@@ -745,9 +745,29 @@ export function defaultParams(ruleIds: string[]): Record<string, unknown> {
   return out;
 }
 
-/** A known OFAC SDN listing — the address that should always be denied. */
+/** A known OFAC SDN listing — denied by both providers. */
 export const SANCTIONED_TEST_ADDRESS =
   "0x7F367cC41522cE07553e823bf3be79A889DEbe1B";
 
+/**
+ * Not on any list. The control.
+ *
+ * This one matters more than the sanctioned address: a policy that cannot read
+ * its oracle denies everything, which looks like correct screening until
+ * something is supposed to pass. Every real bug in this project presented as a
+ * denial.
+ */
 export const CLEAN_TEST_ADDRESS =
-  "0x1111111111111111111111111111111111111111";
+  "0x0710868cBa0a72453E9f1a955Cf917d3A7A6951A";
+
+/**
+ * On OFAC's SDN list, but NOT in the static denylist compiled into the
+ * params-only policy.
+ *
+ * The two providers agree on the addresses above, so side by side they look
+ * identical. They diverge here: the live feed carries ~1,700 wallets, the
+ * static list 93. This address is one of 868 that a snapshot silently
+ * approves — the failure mode of shipping a list instead of querying one.
+ */
+export const RECENTLY_DESIGNATED_TEST_ADDRESS =
+  "0x175d44451403edf28469df03a9280c1197adb92c";
