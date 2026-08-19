@@ -1,43 +1,37 @@
 @import "tailwindcss";
 
 /*
- * Palette and type taken from the "Policy Engine" design.
+ * Ported from the Policy Engine design file.
  *
- * The design specifies GT Sectra, which is a licensed Grilli Type face and was
- * not included with the mockup. Shipping .ttf files in a public repo would be
- * a licensing problem regardless, so the stack falls back to Georgia — a serif
- * with similar warmth and weight. Drop the licensed files into app/fonts and
- * add @font-face here if you have a licence.
+ * The layout uses inline styles copied verbatim from that file so the spacing
+ * and type scale match exactly. Only the things inline styles cannot express
+ * — hover, focus, keyframes, selection — live here.
+ *
+ * The design calls for GT Sectra, a licensed Grilli Type face. The .ttf files
+ * were embedded in the design bundle but are not redistributable, and this
+ * repo is public, so the stack falls back to Georgia. If you have a licence,
+ * drop the files in app/fonts and add @font-face declarations here.
  */
+
 :root {
   color-scheme: light;
 
-  --bg: #fdfcf7;
-  --surface: #f7f4ea;
+  --page: #fdfcf7;
+  --rail: #f7f4ea;
   --raised: #fffefa;
   --ink: #000000;
-  --ink-soft: #171714;
+  --body: #171714;
+  --body-soft: #3a3a34;
   --muted: #5c5c55;
-  --faint: #8a8a80;
-  --line: #e2ded0;
-  --rule: #000000;
-  --accent: #3f6f55;
-
-  /* Rule and type are different greens: the rule carries, the type reads. */
-  --ok: #3f6f55;
+  --ok-rule: #3f6f55;
   --ok-type: #2e5a44;
-  --ok-bg: #f1f5f0;
-  --ok-line: #c3d5c8;
-  --bad: #8e2b1f;
-  --bad-bg: #faf0ee;
-  --bad-line: #e2c3bd;
-  --warn: #c2621a;
-  --warn-bg: #fbf3e9;
-  --warn-line: #ecd5b8;
+  --block: #c2621a;
+  --invalid: #8e2b1f;
 
   --display: "GT Sectra Display", Georgia, "Times New Roman", serif;
   --serif: "GT Sectra", Georgia, "Times New Roman", serif;
   --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 * {
@@ -45,81 +39,47 @@
 }
 
 body {
-  background: var(--bg);
+  margin: 0;
+  background: var(--page);
   color: var(--ink);
-  font-family: var(--sans);
-  -webkit-font-smoothing: antialiased;
-  letter-spacing: -0.011em;
-}
-
-/* Serif for anything that carries the voice: headings, verdicts, prose. */
-.display {
-  font-family: var(--display);
-  letter-spacing: -0.03em;
-  font-weight: 700;
-}
-
-.serif {
   font-family: var(--serif);
-  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
 }
 
-/*
- * The design's section labels: small, uppercase, widely tracked. At this size
- * the tracking is what makes them legible rather than decorative.
- */
-.eyebrow {
-  font-family: var(--sans);
-  font-size: 10.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--muted);
+a {
+  color: #000000;
+  text-decoration: none;
+}
+a:hover {
+  color: #3f6f55;
 }
 
-code,
-pre,
-.mono {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-  letter-spacing: -0.02em;
-  font-variant-ligatures: none;
+::selection {
+  background: #000;
+  color: #fdfcf7;
 }
 
-/* Focus that's visible without being loud. */
-:focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: 2px;
-  border-radius: 6px;
+details summary::-webkit-details-marker {
+  display: none;
+}
+details summary {
+  list-style: none;
 }
 
-textarea,
-input {
-  font-family: inherit;
-}
-
-textarea::placeholder,
-input::placeholder {
-  color: var(--faint);
-}
-
-/* Slim scrollbars inside code panels. */
-pre::-webkit-scrollbar,
-textarea::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-pre::-webkit-scrollbar-thumb,
-textarea::-webkit-scrollbar-thumb {
-  background: #dcdce4;
-  border-radius: 8px;
-  border: 3px solid transparent;
-  background-clip: content-box;
+@keyframes pulseDot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
 }
 
 @keyframes fadeUp {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -127,15 +87,31 @@ textarea::-webkit-scrollbar-thumb {
   }
 }
 
-.fade-up {
-  animation: fadeUp 0.22s ease-out both;
+/* Hover and focus, which the design expresses as style-hover / style-focus. */
+.dc-hover:hover {
+  background: #f7f4ea;
 }
 
-@keyframes pulseDot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+.dc-primary:hover {
+  background: #1d1d1a;
 }
 
-.pulse {
-  animation: pulseDot 1.1s ease-in-out infinite;
+.dc-input:focus {
+  background: #f7f4ea;
+}
+
+.dc-disabled {
+  opacity: 0.28;
+  pointer-events: none;
+}
+
+/* Slim scrollbars so the two independently-scrolling columns stay quiet. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  border: 3px solid transparent;
+  background-clip: content-box;
 }
