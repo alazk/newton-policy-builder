@@ -183,7 +183,12 @@ export const GOALS: Record<string, Goal> = {
     name: "Newton AML/OFAC Policy Engine",
     blurb:
       "Block payments to or from sanctioned addresses, enforced on-chain by an operator quorum before the transaction executes.",
-    providers: ["local-denylist", "yente"],
+    // OpenSanctions only. The params-only denylist still works and is still
+    // defined below, but offering it as a choice asked the user to make a
+    // decision they have no basis for — and the static list covers 93 of the
+    // ~960 OFAC-designated wallets the live feed carries, so picking it is
+    // strictly worse. Add "local-denylist" back here to restore the toggle.
+    providers: ["yente"],
     rules: [
       "payee_not_on_denylist",
       "payer_not_on_denylist",
