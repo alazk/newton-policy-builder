@@ -203,7 +203,7 @@ export default function Wizard() {
             }}
           />
           <div style={{ fontFamily: SANS, fontSize: 11.5, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase" }}>
-            Ethereum Sepolia · Operator quorum live
+            Ethereum Sepolia
           </div>
         </div>
       </div>
@@ -275,7 +275,8 @@ export default function Wizard() {
 
             <div style={{ fontSize: 14.5, color: "#5C5C55" }}>Or try one of these:</div>
 
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            {/* Equal-width columns so neither option reads as the default. */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 10 }}>
               <Shortcut
                 active={to.toLowerCase() === CLEAN_TEST_ADDRESS.toLowerCase()}
                 swatch="#3F6F55"
@@ -388,7 +389,6 @@ export default function Wizard() {
                 animation: "fadeUp 0.24s ease-out both",
               }}
             >
-              <Eyebrow>{run.outcome.eyebrow}</Eyebrow>
               <div
                 style={{
                   fontFamily: DISPLAY,
@@ -404,8 +404,6 @@ export default function Wizard() {
               <div style={{ fontSize: 16.5, lineHeight: 1.45, color: "#171714", maxWidth: "46ch" }}>
                 {run.outcome.reason}
               </div>
-
-              <div style={{ fontFamily: MONO, fontSize: 12.5, color: "#5C5C55" }}>{shortAddr(run.outcome.recipient)}</div>
 
               {run.outcome.denies.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
@@ -570,11 +568,32 @@ function Shortcut({
     <div
       onClick={onClick}
       className="dc-hover"
-      style={{ display: "flex", alignItems: "center", gap: 9, border: "2px solid #000000", padding: "9px 13px", cursor: "pointer" }}
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        gap: 9,
+        border: "2px solid #000000",
+        padding: "11px 13px",
+        cursor: "pointer",
+        minWidth: 0,
+      }}
     >
-      <div style={{ width: 9, height: 9, background: active ? swatch : "transparent", border: active ? "none" : "1.5px solid #5C5C55" }} />
-      <div style={{ fontSize: 14.5 }}>{label}</div>
-      <div style={{ fontSize: 14.5, color: "#5C5C55" }}>{note}</div>
+      <div
+        style={{
+          width: 9,
+          height: 9,
+          flexShrink: 0,
+          alignSelf: "center",
+          background: active ? swatch : "transparent",
+          border: active ? "none" : "1.5px solid #5C5C55",
+        }}
+      />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 14.5 }}>{label}</div>
+        {/* Stacked rather than inline: side by side the two cards are narrow,
+            and the qualifier is the part that gets truncated first. */}
+        <div style={{ fontSize: 13.5, color: "#5C5C55" }}>{note}</div>
+      </div>
     </div>
   );
 }
