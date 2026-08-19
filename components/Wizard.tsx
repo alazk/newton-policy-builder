@@ -279,9 +279,7 @@ export default function Wizard() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 10 }}>
               <Shortcut
                 active={to.toLowerCase() === CLEAN_TEST_ADDRESS.toLowerCase()}
-                swatch="#3F6F55"
-                label="An ordinary wallet"
-                note="no sanctions history"
+                label="Ordinary wallet"
                 onClick={() => {
                   setTo(CLEAN_TEST_ADDRESS);
                   setRun({ status: "idle" });
@@ -289,9 +287,7 @@ export default function Wizard() {
               />
               <Shortcut
                 active={to.toLowerCase() === SANCTIONED_TEST_ADDRESS.toLowerCase()}
-                swatch="#C2621A"
-                label="A sanctioned wallet"
-                note="on the US Treasury list"
+                label="Sanctioned wallet"
                 onClick={() => {
                   setTo(SANCTIONED_TEST_ADDRESS);
                   setRun({ status: "idle" });
@@ -553,49 +549,27 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Shortcut({
-  active,
-  swatch,
-  label,
-  note,
-  onClick,
-}: {
-  active: boolean;
-  swatch: string;
-  label: string;
-  note: string;
-  onClick: () => void;
-}) {
+/**
+ * Selection is shown by inverting the card rather than by a swatch. With no
+ * subtitle there is nothing for a marker to sit against, and a lone square
+ * beside two words reads as a checkbox nobody asked for.
+ */
+function Shortcut({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
     <div
       onClick={onClick}
-      className="dc-hover"
+      className={active ? undefined : "dc-hover"}
       style={{
-        display: "flex",
-        alignItems: "baseline",
-        gap: 9,
         border: "2px solid #000000",
-        padding: "11px 13px",
+        background: active ? "#000000" : "transparent",
+        color: active ? "#FDFCF7" : "#000000",
+        padding: "13px 16px",
         cursor: "pointer",
-        minWidth: 0,
+        textAlign: "center",
+        fontSize: 15,
       }}
     >
-      <div
-        style={{
-          width: 9,
-          height: 9,
-          flexShrink: 0,
-          alignSelf: "center",
-          background: active ? swatch : "transparent",
-          border: active ? "none" : "1.5px solid #5C5C55",
-        }}
-      />
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 14.5 }}>{label}</div>
-        {/* Stacked rather than inline: side by side the two cards are narrow,
-            and the qualifier is the part that gets truncated first. */}
-        <div style={{ fontSize: 13.5, color: "#5C5C55" }}>{note}</div>
-      </div>
+      {label}
     </div>
   );
 }
