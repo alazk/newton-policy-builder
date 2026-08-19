@@ -439,7 +439,9 @@ export default function Wizard() {
             </div>
           )}
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 0, marginTop: "auto" }}>
+          {/* Directly under the verdict, not pinned to the bottom — the rail
+              is taller than the content and the gap read as a mistake. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
             <Expander label="Raw operator response +" disabled={run.status !== "result"}>
               <pre
                 style={{
