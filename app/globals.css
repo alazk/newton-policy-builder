@@ -1,25 +1,41 @@
 @import "tailwindcss";
 
+/*
+ * Palette and type taken from the "Policy Engine" design.
+ *
+ * The design specifies GT Sectra, which is a licensed Grilli Type face and was
+ * not included with the mockup. Shipping .ttf files in a public repo would be
+ * a licensing problem regardless, so the stack falls back to Georgia — a serif
+ * with similar warmth and weight. Drop the licensed files into app/fonts and
+ * add @font-face here if you have a licence.
+ */
 :root {
   color-scheme: light;
 
-  --bg: #fbfbfd;
-  --surface: #ffffff;
-  --ink: #0b0b0f;
-  --muted: #6b6b78;
-  --faint: #9a9aa8;
-  --line: #e8e8ee;
-  --accent: #0b0b0f;
+  --bg: #fdfcf7;
+  --surface: #f7f4ea;
+  --raised: #fffefa;
+  --ink: #000000;
+  --ink-soft: #171714;
+  --muted: #5c5c55;
+  --faint: #8a8a80;
+  --line: #e2ded0;
+  --rule: #000000;
+  --accent: #3f6f55;
 
-  --ok: #0f7a4d;
-  --ok-bg: #edfaf3;
-  --ok-line: #b8e6cd;
-  --bad: #b3261e;
-  --bad-bg: #fdf0ef;
-  --bad-line: #f3c9c5;
-  --warn: #8a5a00;
-  --warn-bg: #fdf7e8;
-  --warn-line: #f0dfae;
+  --ok: #3f6f55;
+  --ok-bg: #f1f5f0;
+  --ok-line: #c3d5c8;
+  --bad: #8e2b1f;
+  --bad-bg: #faf0ee;
+  --bad-line: #e2c3bd;
+  --warn: #c2621a;
+  --warn-bg: #fbf3e9;
+  --warn-line: #ecd5b8;
+
+  --display: "GT Sectra Display", Georgia, "Times New Roman", serif;
+  --serif: "GT Sectra", Georgia, "Times New Roman", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
 }
 
 * {
@@ -29,9 +45,34 @@
 body {
   background: var(--bg);
   color: var(--ink);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--sans);
   -webkit-font-smoothing: antialiased;
   letter-spacing: -0.011em;
+}
+
+/* Serif for anything that carries the voice: headings, verdicts, prose. */
+.display {
+  font-family: var(--display);
+  letter-spacing: -0.03em;
+  font-weight: 700;
+}
+
+.serif {
+  font-family: var(--serif);
+  letter-spacing: -0.01em;
+}
+
+/*
+ * The design's section labels: small, uppercase, widely tracked. At this size
+ * the tracking is what makes them legible rather than decorative.
+ */
+.eyebrow {
+  font-family: var(--sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
 }
 
 code,
