@@ -182,9 +182,17 @@ export default function Wizard() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-          <div style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 46, lineHeight: 1, letterSpacing: "-0.02em" }}>
-            Newton
-          </div>
+          {/*
+            The real mark, not Georgia standing in for GT Sectra. Plain <img>
+            rather than next/image: it is a fixed-size decorative logo, so the
+            optimisation pipeline buys nothing and adds a dependency on the
+            image loader working in every deploy target.
+          */}
+          <img
+            src="/newton-logo.svg"
+            alt="Newton"
+            style={{ height: 26, width: "auto", display: "block" }}
+          />
           <div
             style={{
               background: "#000000",
