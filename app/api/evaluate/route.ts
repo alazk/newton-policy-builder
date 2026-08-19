@@ -28,14 +28,7 @@ const GATEWAY = process.env.NEWTON_GATEWAY_URL ?? "https://gateway.testnet.newto
 export async function POST(req: NextRequest) {
   const apiKey = process.env.NEWTON_API_KEY;
   if (!apiKey) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          "NEWTON_API_KEY is not set. Add it to .env.local — dashboard.newton.xyz → API Keys — then restart `npm run dev`.",
-      },
-      { status: 500 },
-    );
+    return NextResponse.json({ ok: false, error: missingKeyMessage() }, { status: 500 });
   }
 
   let body: {
@@ -214,10 +207,7 @@ async function submitRealTask({
 }) {
   const apiKey = process.env.NEWTON_API_KEY;
   if (!apiKey) {
-    return NextResponse.json(
-      { ok: false, error: "NEWTON_API_KEY is not set in .env.local" },
-      { status: 500 },
-    );
+    return NextResponse.json({ ok: false, error: missingKeyMessage() }, { status: 500 });
   }
 
   /**
@@ -370,6 +360,24 @@ function toQuantity(n: number): string {
 function oracleArgs(): Record<string, string> {
   const url = process.env.YENTE_URL;
   return url ? { yente_url: url, dataset: process.env.YENTE_DATASET ?? "sanctions" } : {};
+}
+
+/**
+ * Tell the user where to fix it, in the environment they are actually in.
+ *
+ * The old text said "add it to .env.local and restart npm run dev", which is
+ * useless advice to someone looking at the deployed site — .env.local is
+ * gitignored and never reaches Vercel. Wrong-but-confident instructions cost
+ * more time than a vague error.
+ */
+function missingKeyMessage(): string {
+  const onVercel = Boolean(process.env.VERCEL);
+  return onVercel
+    ? "NEWTON_API_KEY is not set on this deployment. Add it in Vercel under " +
+        "Settings → Environment Variables, then redeploy — env changes do not apply " +
+        "to an existing deployment."
+    : "NEWTON_API_KEY is not set. Add it to .env.local — dashboard.newton.xyz → API Keys — " +
+        "then restart `npm run dev`.";
 }
 
 /** wasm_args is a hex-encoded UTF-8 JSON string. */
