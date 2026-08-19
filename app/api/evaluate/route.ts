@@ -45,6 +45,10 @@ export async function POST(req: NextRequest) {
     from?: string;
     to?: string;
     value?: string;
+    /** "submit" for a real quorum-signed task; anything else simulates. */
+    mode?: string;
+    /** Selects which provider's PolicyClient a submitted task goes to. */
+    providerId?: string;
   };
 
   try {

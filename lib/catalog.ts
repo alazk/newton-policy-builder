@@ -71,9 +71,9 @@ export const PROVIDERS: Record<string, Provider> = {
     dataPath: "data.params",
     requiredSecrets: [],
     fields: ["__params_only__"],
-    // Test-only. The client is bound to the yente policy; binding this one
-    // instead is a deploy, not a toggle.
-    submittable: false,
+    // Has its own PolicyClient (POLICY_CLIENT_DENYLIST), so Submit evaluates
+    // THIS policy rather than borrowing the one bound to the yente client.
+    submittable: true,
   },
   yente: {
     id: "yente",
