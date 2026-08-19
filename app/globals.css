@@ -96,6 +96,41 @@ details summary {
   background: #1d1d1a;
 }
 
+/*
+ * The primary action inverts, slowly, once its prerequisites are met.
+ *
+ * A ring pulse was too subtle to notice. This swaps the fill and the type
+ * together so the button reads at both ends of the cycle, with a permanent
+ * 3px frame so the light half still has an edge. Animations outrank inline
+ * styles in the cascade, which is what lets this override the button's own
+ * background.
+ */
+@keyframes readyBlink {
+  0%,
+  100% {
+    background: #000000;
+    color: #fdfcf7;
+  }
+  50% {
+    background: #fdfcf7;
+    color: #000000;
+  }
+}
+
+.dc-ready {
+  border: 3px solid #000000;
+  animation: readyBlink 2.6s ease-in-out infinite;
+}
+
+/* Anyone who has asked the OS for less motion should not get a pulsing
+   call-to-action. */
+@media (prefers-reduced-motion: reduce) {
+  .dc-ready,
+  .pulse {
+    animation: none;
+  }
+}
+
 .dc-input:focus {
   background: #f7f4ea;
 }
@@ -103,6 +138,63 @@ details summary {
 .dc-disabled {
   opacity: 0.28;
   pointer-events: none;
+}
+
+/* Buttons carrying design-file styling, stripped of the UA defaults. */
+.dc-reset {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  width: 100%;
+}
+
+/*
+ * Visible focus. The design has none, but every control here is a <button>
+ * and a keyboard user needs to see where they are. Offset inward so it does
+ * not collide with the 3px frames.
+ */
+.dc-reset:focus-visible {
+  outline: 3px solid #c2621a;
+  outline-offset: -6px;
+}
+
+/*
+ * Single column below 900px.
+ *
+ * The design assumes a wide viewport and the grid had no breakpoint, so on a
+ * phone both columns were squeezed side by side. A shared demo link gets
+ * opened on phones.
+ */
+@media (max-width: 900px) {
+  .dc-split {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .dc-rail {
+    border-left: none !important;
+    border-top: 3px solid #000000 !important;
+  }
+  .dc-pad {
+    padding: 28px 22px 40px !important;
+  }
+  .dc-mast {
+    padding: 20px 22px !important;
+  }
+}
+
+/* Height is only fixed where there is room for two independent scrolls. */
+@media (max-width: 900px) {
+  .dc-page {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .dc-scroll {
+    overflow-y: visible !important;
+  }
 }
 
 /* Slim scrollbars so the two independently-scrolling columns stay quiet. */
