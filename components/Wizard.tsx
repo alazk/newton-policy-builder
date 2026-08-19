@@ -26,7 +26,6 @@ import {
   rulesForProvider,
   SANCTIONED_TEST_ADDRESS,
   CLEAN_TEST_ADDRESS,
-  RECENTLY_DESIGNATED_TEST_ADDRESS,
   type Selection,
 } from "@/lib/catalog";
 
@@ -61,13 +60,6 @@ const SCENARIOS = [
     label: "OFAC SDN",
     note: "both sources block",
     address: SANCTIONED_TEST_ADDRESS,
-    tone: "bad" as const,
-  },
-  {
-    id: "gap",
-    label: "Beyond the snapshot",
-    note: "live blocks, static misses",
-    address: RECENTLY_DESIGNATED_TEST_ADDRESS,
     tone: "bad" as const,
   },
 ];
