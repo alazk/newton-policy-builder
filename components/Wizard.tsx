@@ -1,18 +1,13 @@
 "use client";
 
 /**
- * One screen: pick a source, put an address in, get a verdict out.
+ * Controls left, decision right.
  *
- * This replaced a four-step wizard. The steps were honest about the data model
- * — goal, provider, rules, run — but they were four clicks in front of the only
- * thing anyone wants to see, and the rule toggles were misleading: Submit
- * evaluates the policy deployed on-chain, so editing rules changed the Test
- * result and nothing else. Removing controls that don't affect the real
- * decision is a correctness fix as much as a design one.
- *
- * The rules still exist in the catalog and still generate the Rego shown under
- * "policy source"; they are simply applied at their defaults rather than
- * presented as knobs.
+ * The verdict is the product — everything on the left exists to produce it —
+ * so it gets its own permanent panel rather than appearing below the fold
+ * after a run. It also means the previous result stays visible while you
+ * change a source and run again, which is what makes the two providers
+ * comparable.
  */
 
 import { useMemo, useState } from "react";
@@ -29,39 +24,29 @@ import {
   type Selection,
 } from "@/lib/catalog";
 
+type Outcome = {
+  allow: boolean | null;
+  headline: string;
+  eyebrow: string;
+  reason?: string;
+  denySet: string[];
+  mode: string;
+  latency: number | null;
+  explorerUrl?: string | null;
+  raw: unknown;
+  tone: "ok" | "bad" | "warn";
+};
+
 type RunState =
   | { status: "idle" }
-  | { status: "running" }
-  | { status: "done"; allow: boolean; reason?: string; raw: unknown }
-  | { status: "submitting" }
-  | { status: "submitted"; taskId: string | null; explorerUrl: string | null; raw: unknown }
-  | { status: "error"; error: string; hint?: string; raw?: unknown };
+  | { status: "running"; label: string; detail: string }
+  | { status: "result"; outcome: Outcome };
 
 const GOAL_ID = Object.keys(GOALS)[0];
 
-/**
- * Three addresses that tell the whole story.
- *
- * The clean one is not decoration. Both providers deny the sanctioned
- * addresses, so a completely broken policy — one that cannot read its oracle
- * and denies unconditionally — passes both of those tests. Only the clean case
- * catches it.
- */
 const SCENARIOS = [
-  {
-    id: "clean",
-    label: "Clean wallet",
-    note: "not on any list",
-    address: CLEAN_TEST_ADDRESS,
-    tone: "ok" as const,
-  },
-  {
-    id: "ofac",
-    label: "OFAC SDN",
-    note: "both sources block",
-    address: SANCTIONED_TEST_ADDRESS,
-    tone: "bad" as const,
-  },
+  { id: "clean", label: "Clean wallet", note: "not on any list", address: CLEAN_TEST_ADDRESS, tone: "ok" as const },
+  { id: "ofac", label: "OFAC SDN", note: "both sources block", address: SANCTIONED_TEST_ADDRESS, tone: "bad" as const },
 ];
 
 /** Never render an object into the DOM — that's where "[object Object]" comes from. */
@@ -76,6 +61,8 @@ function asText(v: unknown): string {
   }
 }
 
+const shortAddr = (a: string) => (a.length > 14 ? `${a.slice(0, 10)}…${a.slice(-6)}` : a);
+
 export default function Wizard() {
   const goal = GOALS[GOAL_ID];
   const firstProvider = goal.providers[0];
@@ -87,7 +74,7 @@ export default function Wizard() {
   const [params, setParams] = useState<Record<string, unknown>>(() =>
     defaultParams(rulesForProvider(GOAL_ID, firstProvider).filter((r) => RULES[r]?.defaultOn)),
   );
-  const [to, setTo] = useState(CLEAN_TEST_ADDRESS);
+  const [to, setTo] = useState(SANCTIONED_TEST_ADDRESS);
   const [run, setRun] = useState<RunState>({ status: "idle" });
 
   const provider = PROVIDERS[providerId];
@@ -104,8 +91,26 @@ export default function Wizard() {
     setRun({ status: "idle" });
   }
 
+  function fail(error: string, raw: unknown, mode: string, latency: number | null) {
+    setRun({
+      status: "result",
+      outcome: {
+        allow: null,
+        headline: "Couldn't complete",
+        eyebrow: "Error",
+        reason: error,
+        denySet: [],
+        mode,
+        latency,
+        raw,
+        tone: "warn",
+      },
+    });
+  }
+
   async function doRun() {
-    setRun({ status: "running" });
+    setRun({ status: "running", label: "Screening", detail: "newt_simulatePolicy · 1 operator" });
+    const t0 = performance.now();
     try {
       const res = await fetch("/api/evaluate", {
         method: "POST",
@@ -113,31 +118,38 @@ export default function Wizard() {
         body: JSON.stringify({ rego, params: effectiveParams, policyDataAddress: provider.policyData, to }),
       });
       const json = await res.json();
-      if (!res.ok || json.ok === false) {
-        setRun({ status: "error", error: asText(json.error) || "Request failed", hint: json.hint, raw: json.raw });
-        return;
-      }
-      if (json.result?.success === false || json.result?.error) {
-        setRun({ status: "error", error: asText(json.result.error ?? "evaluation failed"), raw: json.result });
-        return;
-      }
+      const latency = (performance.now() - t0) / 1000;
+
+      if (!res.ok || json.ok === false) return fail(asText(json.error) || "Request failed", json.raw, "newt_simulatePolicy", latency);
+      if (json.result?.success === false || json.result?.error)
+        return fail(asText(json.result.error ?? "evaluation failed"), json.result, "newt_simulatePolicy", latency);
+
       const allow = extractAllow(json.result);
-      if (allow === undefined) {
-        setRun({
-          status: "error",
-          error: "Couldn't find the decision in the response. Check the raw output below.",
+      if (allow === undefined)
+        return fail("Couldn't find the decision in the response.", json.result, "newt_simulatePolicy", latency);
+
+      setRun({
+        status: "result",
+        outcome: {
+          allow,
+          headline: allow ? "Compliant" : "Non Compliant",
+          eyebrow: "Quick test · nothing recorded",
+          reason: extractReason(json.result),
+          denySet: extractDenySet(json.result),
+          mode: "newt_simulatePolicy · 1 operator",
+          latency,
           raw: json.result,
-        });
-        return;
-      }
-      setRun({ status: "done", allow, reason: extractReason(json.result), raw: json.result });
+          tone: allow ? "ok" : "bad",
+        },
+      });
     } catch (e) {
-      setRun({ status: "error", error: asText(e) });
+      fail(asText(e), null, "newt_simulatePolicy", null);
     }
   }
 
   async function doSubmit() {
-    setRun({ status: "submitting" });
+    setRun({ status: "running", label: "Awaiting quorum", detail: "newt_createTask · BLS aggregation" });
+    const t0 = performance.now();
     try {
       const res = await fetch("/api/evaluate", {
         method: "POST",
@@ -153,45 +165,60 @@ export default function Wizard() {
         }),
       });
       const json = await res.json();
-      if (!res.ok || json.ok === false) {
-        setRun({ status: "error", error: asText(json.error) || "Submit failed", hint: json.hint, raw: json.raw });
-        return;
-      }
+      const latency = (performance.now() - t0) / 1000;
+
+      if (!res.ok || json.ok === false)
+        return fail(asText(json.error) || "Submit failed", json.raw, "newt_createTask", latency);
+
+      const allow = extractAllow(json.result);
       setRun({
-        status: "submitted",
-        taskId: json.taskId ?? null,
-        explorerUrl: json.explorerUrl ?? null,
-        raw: json.result,
+        status: "result",
+        outcome: {
+          allow: allow ?? null,
+          headline: allow === false ? "Non Compliant" : allow === true ? "Compliant" : "Attested",
+          eyebrow: "Screened on-chain · quorum signed",
+          reason: extractReason(json.result),
+          denySet: extractDenySet(json.result),
+          mode: "newt_createTask · operator quorum",
+          latency,
+          explorerUrl: json.explorerUrl ?? null,
+          raw: json.result,
+          tone: allow === false ? "bad" : "ok",
+        },
       });
     } catch (e) {
-      setRun({ status: "error", error: asText(e) });
+      fail(asText(e), null, "newt_createTask", null);
     }
   }
 
   const validAddress = /^0x[a-fA-F0-9]{40}$/.test(to);
-  const busy = run.status === "running" || run.status === "submitting";
+  const busy = run.status === "running";
 
   return (
-    <div className="mx-auto w-full max-w-3xl">
-      {/* ── Header ───────────────────────────────────────────── */}
-      <header className="flex flex-wrap items-end justify-between gap-6 border-b-[3px] border-[var(--rule)] px-6 py-7 sm:px-10">
-        <div>
-          <div className="eyebrow">Newton</div>
-          <h1 className="display mt-1.5 text-[34px] leading-[1.05] sm:text-[46px]">
+    // Fixed height, no document scroll — each column scrolls on its own, so
+    // the verdict stays put while you change a source and run again. That
+    // side-by-side comparison is the whole point of having two providers.
+    <div className="flex h-screen flex-col overflow-hidden">
+      {/* ── Masthead ─────────────────────────────────────────── */}
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-4 border-b-[3px] border-[var(--rule)] px-7 py-5">
+        <div className="flex items-center gap-4">
+          <span className="display text-[30px] leading-none">Newton</span>
+          <span className="bg-[var(--ink)] px-4 py-2.5 text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--bg)]">
             AML / OFAC Policy Engine
-          </h1>
+          </span>
         </div>
-        <div className="flex items-center gap-2 pb-1 text-[11.5px] text-[var(--muted)]">
-          <span className="pulse inline-block size-1.5 rounded-full bg-[var(--accent)]" />
-          Ethereum Sepolia · operator quorum live
+        <div className="flex items-center gap-2 border border-[var(--line)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+          <span className="pulse inline-block size-1.5 rounded-full bg-[var(--faint)]" />
+          Ethereum Sepolia · Operator quorum live
         </div>
       </header>
 
-      <div className="px-6 py-9 sm:px-10">
-        {/* ── Source ─────────────────────────────────────────── */}
-        <div className="mb-9">
+      <div className="grid min-h-0 flex-1 lg:grid-cols-2">
+        {/* ── Controls ───────────────────────────────────────── */}
+        <div className="overflow-y-auto border-[var(--rule)] px-7 py-8 lg:border-r-[3px]">
           <SectionLabel n="01">Screening source</SectionLabel>
-          <div className="grid gap-3 sm:grid-cols-2">
+
+          <div className="grid gap-4 sm:grid-cols-2">
             {goal.providers.map((pid) => {
               const p = PROVIDERS[pid];
               const active = pid === providerId;
@@ -199,187 +226,246 @@ export default function Wizard() {
                 <button
                   key={pid}
                   onClick={() => pickProvider(pid)}
-                  className={`group border p-5 text-left transition ${
-                    active
-                      ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--bg)]"
-                      : "border-[var(--line)] bg-[var(--raised)] hover:border-[var(--ink)]"
+                  className={`flex flex-col border text-left transition ${
+                    active ? "border-[var(--ink)] bg-[var(--surface)]" : "border-[var(--line)] hover:border-[var(--ink)]"
                   }`}
                 >
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className="serif text-[20px] leading-none">
-                      {pid === "yente" ? "OpenSanctions" : "Denylist"}
-                    </span>
-                    <span
-                      className={`eyebrow ${active ? "text-[var(--bg)]/60" : ""}`}
-                      style={active ? undefined : { color: "var(--accent)" }}
-                    >
-                      {pid === "yente" ? "Live" : "Snapshot"}
-                    </span>
+                  <div className="flex-1 p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="serif text-[21px] leading-none">
+                        {pid === "yente" ? "OpenSanctions" : "Denylist"}
+                      </span>
+                      <span className="border border-[var(--ink)] px-2 py-1 text-[9.5px] font-semibold uppercase tracking-[0.12em]">
+                        {pid === "yente" ? "Live" : "Snapshot"}
+                      </span>
+                    </div>
+                    <p className="serif mt-3 text-[14px] leading-[1.5] text-[var(--ink)]">
+                      {pid === "yente"
+                        ? "~1,700 wallets across OFAC, EU, UN and UK lists. Refreshed daily."
+                        : "93 OFAC addresses carried in the policy params. No oracle call."}
+                    </p>
+                    <div className="mono mt-4 text-[11px] text-[var(--muted)]">{p?.dataPath}</div>
                   </div>
-                  <p
-                    className={`mt-3 text-[12.5px] leading-relaxed ${
-                      active ? "text-[var(--bg)]/70" : "text-[var(--muted)]"
-                    }`}
-                  >
-                    {pid === "yente"
-                      ? "~1,700 wallets across OFAC, EU, UN and UK lists. Refreshed daily."
-                      : "93 OFAC addresses carried in the policy params. No oracle call."}
-                  </p>
-                  <div
-                    className={`mono mt-4 text-[10.5px] ${
-                      active ? "text-[var(--bg)]/50" : "text-[var(--faint)]"
-                    }`}
-                  >
-                    {p?.dataPath}
-                  </div>
+                  {active && (
+                    <div className="bg-[var(--ink)] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--bg)]">
+                      Selected
+                    </div>
+                  )}
                 </button>
               );
             })}
           </div>
-        </div>
 
-        {/* ── Address ────────────────────────────────────────── */}
-        <div className="mb-9">
-          <SectionLabel n="02">Recipient address</SectionLabel>
+          <div className="mt-9">
+            <SectionLabel n="02">Recipient address</SectionLabel>
+            <input
+              value={to}
+              onChange={(e) => {
+                setTo(e.target.value.trim());
+                setRun({ status: "idle" });
+              }}
+              spellCheck={false}
+              placeholder="0x…"
+              className="mono w-full border border-[var(--ink)] bg-transparent px-5 py-4 text-[15px] outline-none"
+            />
+            {to && !validAddress && (
+              <p className="mt-2 text-[12px] text-[var(--bad)]">Not a valid 20-byte address.</p>
+            )}
 
-          <input
-            value={to}
-            onChange={(e) => {
-              setTo(e.target.value.trim());
-              setRun({ status: "idle" });
-            }}
-            spellCheck={false}
-            placeholder="0x…"
-            className="mono w-full border border-[var(--line)] bg-[var(--raised)] px-4 py-4 text-[14px] tracking-tight outline-none transition focus:border-[var(--ink)]"
-          />
+            <div className="mt-3 flex flex-wrap gap-3">
+              {SCENARIOS.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => {
+                    setTo(s.address);
+                    setRun({ status: "idle" });
+                  }}
+                  className={`serif flex items-center gap-2.5 border px-4 py-2.5 text-[14px] transition ${
+                    to.toLowerCase() === s.address.toLowerCase()
+                      ? "border-[var(--ink)]"
+                      : "border-[var(--line)] hover:border-[var(--ink)]"
+                  }`}
+                >
+                  <span
+                    className="inline-block size-2.5 shrink-0"
+                    style={{ background: s.tone === "ok" ? "transparent" : "var(--warn)", border: s.tone === "ok" ? "1px solid var(--muted)" : "none" }}
+                  />
+                  {s.label}
+                  <span className="text-[var(--muted)]">{s.note}</span>
+                </button>
+              ))}
+            </div>
+          </div>
 
-          {to && !validAddress && (
-            <p className="mt-2 text-[12px] text-[var(--bad)]">Not a valid 20-byte address.</p>
-          )}
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            {SCENARIOS.map((s) => (
+          <div className="mt-9">
+            <SectionLabel n="03">Decision</SectionLabel>
+            <div className="flex flex-wrap gap-3">
               <button
-                key={s.id}
-                onClick={() => {
-                  setTo(s.address);
-                  setRun({ status: "idle" });
-                }}
-                className={`flex items-center gap-2 border px-3 py-2 text-left text-[12px] transition ${
-                  to.toLowerCase() === s.address.toLowerCase()
-                    ? "border-[var(--ink)] bg-[var(--raised)]"
-                    : "border-[var(--line)] bg-[var(--raised)] hover:border-[var(--ink)]"
-                }`}
+                onClick={doSubmit}
+                disabled={!validAddress || busy || !provider?.submittable}
+                className="flex-1 bg-[var(--ink)] px-6 py-4 text-[13px] font-semibold uppercase tracking-[0.1em] text-[var(--bg)] transition hover:bg-[var(--ink-soft)] disabled:opacity-25"
               >
-                <span
-                  className="inline-block size-1.5 shrink-0 rounded-full"
-                  style={{ background: s.tone === "ok" ? "var(--ok)" : "var(--bad)" }}
-                />
-                <span>
-                  <span className="font-medium">{s.label}</span>
-                  <span className="ml-1.5 text-[var(--faint)]">{s.note}</span>
-                </span>
+                Screen on-chain
               </button>
-            ))}
-          </div>
-        </div>
+              <button
+                onClick={doRun}
+                disabled={!validAddress || busy}
+                className="border border-[var(--ink)] px-6 py-4 text-[13px] font-semibold uppercase tracking-[0.1em] transition hover:bg-[var(--surface)] disabled:opacity-25"
+              >
+                Quick test
+              </button>
+            </div>
 
-        {/* ── Decision ───────────────────────────────────────── */}
-        <div>
-          <SectionLabel n="03">Decision</SectionLabel>
-
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={doSubmit}
-              disabled={!validAddress || busy || !provider?.submittable}
-              className="flex-1 border border-[var(--ink)] bg-[var(--ink)] px-6 py-4 text-[14px] font-medium text-[var(--bg)] transition hover:bg-[var(--ink-soft)] disabled:opacity-25"
-            >
-              {run.status === "submitting" ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="pulse inline-block size-1.5 rounded-full bg-[var(--bg)]" />
-                  Awaiting quorum…
-                </span>
-              ) : (
-                "Screen on-chain"
-              )}
-            </button>
-            <button
-              onClick={doRun}
-              disabled={!validAddress || busy}
-              className="border border-[var(--ink)] bg-transparent px-6 py-4 text-[14px] font-medium transition hover:bg-[var(--surface)] disabled:opacity-25"
-            >
-              {run.status === "running" ? "Testing…" : "Quick test"}
-            </button>
-          </div>
-
-          <p className="mt-3 text-[12.5px] leading-relaxed text-[var(--muted)]">
-            <span className="font-medium text-[var(--ink)]">Screen on-chain</span> submits a real
-            task: an operator quorum evaluates the deployed policy and signs the result.{" "}
-            <span className="font-medium text-[var(--ink)]">Quick test</span> asks a single operator
-            and records nothing.
-          </p>
-
-          {!provider?.submittable && (
-            // Each PolicyClient binds one policy. Submitting under a provider
-            // without its own client would evaluate a different policy and
-            // label the answer with this one.
-            <p className="mt-3 border-l-2 border-[var(--warn)] bg-[var(--warn-bg)] px-3 py-2.5 text-[12px] leading-relaxed text-[var(--muted)]">
-              This source has no PolicyClient deployed, so it can only be tested — a real submission
-              would evaluate a different policy and report the result as though it came from this
-              one.
+            <p className="serif mt-4 max-w-md text-[14px] leading-[1.55]">
+              <strong className="font-bold">Screen on-chain</strong> submits a real task: an operator
+              quorum evaluates the deployed policy and signs the result.{" "}
+              <strong className="font-bold">Quick test</strong> asks a single operator and records
+              nothing.
             </p>
-          )}
+
+            {!provider?.submittable && (
+              // Each PolicyClient binds one policy. Submitting under a provider
+              // without its own client would evaluate a different policy and
+              // label the answer with this one.
+              <p className="mt-4 border-l-2 border-[var(--warn)] bg-[var(--warn-bg)] px-4 py-3 text-[12.5px] leading-relaxed text-[var(--muted)]">
+                This source has no PolicyClient deployed, so it can only be tested — a real
+                submission would evaluate a different policy and report the result as though it came
+                from this one.
+              </p>
+            )}
+          </div>
         </div>
 
-      {/* ── Verdict ──────────────────────────────────────────── */}
-      {run.status === "done" && (
-        <Verdict
-          tone={run.allow ? "ok" : "bad"}
-          headline={run.allow ? "Allowed" : "Blocked"}
-          sub={run.reason ?? "Evaluated by one operator. Not recorded on-chain."}
-          raw={run.raw}
-        />
-      )}
+        {/* ── Decision panel ─────────────────────────────────── */}
+        <div className="overflow-y-auto bg-[var(--surface)] px-7 py-8">
+          {run.status === "idle" && (
+            <div className="border border-[var(--line)] p-8">
+              <div className="eyebrow">Verdict</div>
+              {/* Display Light at 52px per the spec — the idle state should
+                  read as absence, not as a result. */}
+              <div className="mt-3 text-[52px] font-light leading-[0.95] text-[var(--faint)] [font-family:var(--display)]">
+                No decision yet
+              </div>
+              <p className="serif mt-4 max-w-md text-[14.5px] leading-[1.6] text-[var(--muted)]">
+                Pick a screening source and an address, then run it. The policy is evaluated as a
+                deny set, so a missing oracle answer produces a named denial rather than a silent
+                pass.
+              </p>
+            </div>
+          )}
 
-      {run.status === "submitted" && (
-        <Verdict tone="neutral" headline="Attested" sub="Quorum reached and the result signed." raw={run.raw}>
-          {run.explorerUrl && (
+          {run.status === "running" && (
+            <div className="border border-[var(--line)] p-8">
+              <div className="eyebrow flex items-center gap-2">
+                <span className="pulse inline-block size-1.5 rounded-full bg-[var(--warn)]" />
+                {run.detail}
+              </div>
+              <div className="display mt-3 text-[40px] leading-[0.95]">{run.label}</div>
+            </div>
+          )}
+
+          {run.status === "result" && <Decision o={run.outcome} to={to} provider={provider} rego={rego} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Decision panel ────────────────────────────────────────── */
+
+function Decision({
+  o,
+  to,
+  provider,
+  rego,
+}: {
+  o: Outcome;
+  to: string;
+  provider: any;
+  rego: string;
+}) {
+  /**
+   * The rule and the headline are different weights of the same idea, and for
+   * the compliant state the spec gives them different greens — a lighter rule
+   * over darker type, so the type stays readable at 62px without the rule
+   * looking muddy.
+   */
+  const rule = o.tone === "ok" ? "var(--ok)" : o.tone === "bad" ? "var(--warn)" : "var(--bad)";
+  const type = o.tone === "ok" ? "var(--ok-type)" : o.tone === "bad" ? "var(--warn)" : "var(--bad)";
+
+  return (
+    <div className="fade-up">
+      <div className="border border-[var(--line)] bg-[var(--raised)]">
+        <div className="h-3" style={{ background: rule }} />
+        <div className="p-8">
+          <div className="eyebrow">{o.eyebrow}</div>
+          <div
+            className="display mt-3 text-[52px] leading-[0.92] sm:text-[62px]"
+            style={{ color: type }}
+          >
+            {o.headline}
+          </div>
+          {o.reason && (
+            <p className="serif mt-4 max-w-lg text-[16px] leading-[1.55]">{o.reason}</p>
+          )}
+
+          {o.denySet.length > 0 && (
+            <div className="mt-5 flex flex-wrap gap-2">
+              {o.denySet.map((d) => (
+                <span
+                  key={d}
+                  className="mono border px-3 py-1.5 text-[12px]"
+                  style={{ borderColor: type, color: type }}
+                >
+                  {d}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {o.explorerUrl && (
             <a
-              href={run.explorerUrl}
+              href={o.explorerUrl}
               target="_blank"
               rel="noreferrer"
-              className="mt-5 inline-flex items-center gap-1.5 border border-[var(--ink)] bg-[var(--ink)] px-4 py-2.5 text-[13px] font-medium text-[var(--bg)] transition hover:bg-[var(--ink-soft)]"
+              className="mt-6 inline-flex items-center gap-1.5 bg-[var(--ink)] px-5 py-3 text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--bg)] transition hover:bg-[var(--ink-soft)]"
             >
               View attestation <span aria-hidden>↗</span>
             </a>
           )}
-        </Verdict>
-      )}
+        </div>
+      </div>
 
-      {run.status === "error" && (
-        <Verdict tone="warn" headline="Couldn't complete" sub={run.hint ?? ""} raw={run.raw}>
-          <pre className="mono mt-2 max-h-44 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed">
-            {run.error}
-          </pre>
-        </Verdict>
-      )}
+      {/* Facts about the run, not about the decision. */}
+      <dl className="mt-7 space-y-0">
+        <Row k="Mode" v={o.mode} />
+        <Row k="Source" v={provider?.name ?? "—"} />
+        <Row k="Recipient" v={shortAddr(to)} mono />
+        <Row k="Deny set" v={o.denySet.length ? JSON.stringify(o.denySet) : "[]"} mono />
+        <Row k="Latency" v={o.latency != null ? `${o.latency.toFixed(2)}s` : "—"} />
+      </dl>
 
-        {/* ── Machinery ──────────────────────────────────────── */}
-        <details className="mt-9 border-t border-[var(--line)] pt-5">
-          <summary className="eyebrow cursor-pointer transition hover:text-[var(--ink)]">
-            Policy source
-          </summary>
+      <details className="mt-5 border-t border-[var(--line)] pt-4">
+        <summary className="eyebrow cursor-pointer transition hover:text-[var(--ink)]">
+          Raw operator response +
+        </summary>
+        <pre className="mono mt-3 max-h-72 overflow-auto border border-[var(--line)] bg-[var(--raised)] p-4 text-[11px] leading-relaxed">
+          {asText(o.raw)}
+        </pre>
+      </details>
 
-          <dl className="mono mt-4 space-y-1.5 text-[11.5px]">
-            <Row k="PolicyClient" v={process.env.NEXT_PUBLIC_POLICY_CLIENT ?? "—"} />
-            <Row k="Oracle" v={provider?.policyData || "none — params only"} />
-            <Row k="Reads" v={`${provider?.dataPath}.*`} />
-          </dl>
-
-          <pre className="mono mt-4 max-h-80 overflow-auto border border-[var(--line)] bg-[var(--raised)] p-4 text-[11.5px] leading-relaxed">
-            {rego}
-          </pre>
-        </details>
+      <div className="mt-7 border border-[var(--ink)]">
+        <div className="border-b border-[var(--ink)] px-5 py-3 text-[10.5px] font-semibold uppercase tracking-[0.14em]">
+          Policy source
+        </div>
+        <dl className="px-5 py-3">
+          <Row k="PolicyClient" v={shortAddr(process.env.NEXT_PUBLIC_POLICY_CLIENT ?? "—")} mono bare />
+          <Row k="Oracle" v={provider?.policyData ? shortAddr(provider.policyData) : "params only"} mono bare />
+          <Row k="Reads" v={`${provider?.dataPath}.*`} mono bare />
+        </dl>
+        <pre className="mono max-h-72 overflow-auto border-t border-[var(--line)] bg-[var(--raised)] p-5 text-[11.5px] leading-relaxed">
+          {rego}
+        </pre>
       </div>
     </div>
   );
@@ -387,82 +473,25 @@ export default function Wizard() {
 
 /* ── Building blocks ───────────────────────────────────────── */
 
-/** Numbered rule, per the design: 01 / 02 / 03 against a hairline. */
 function SectionLabel({ n, children }: { n?: string; children: React.ReactNode }) {
   return (
-    <div className="mb-4 flex items-center gap-3">
-      {n && <span className="eyebrow" style={{ color: "var(--accent)" }}>{n}</span>}
-      <span className="eyebrow">{children}</span>
+    <div className="mb-5 flex items-center gap-4">
+      {n && <span className="display text-[15px] leading-none">{n}</span>}
+      <span className="eyebrow text-[var(--ink)]">{children}</span>
       <span className="h-px flex-1 bg-[var(--line)]" />
     </div>
   );
 }
 
-function Row({ k, v }: { k: string; v: string }) {
+function Row({ k, v, mono, bare }: { k: string; v: string; mono?: boolean; bare?: boolean }) {
   return (
-    <div className="flex justify-between gap-4">
-      <dt className="shrink-0 text-[var(--faint)]">{k}</dt>
-      <dd className="truncate text-[var(--muted)]">{v}</dd>
-    </div>
-  );
-}
-
-function Verdict({
-  tone,
-  headline,
-  sub,
-  raw,
-  children,
-}: {
-  tone: "ok" | "bad" | "warn" | "neutral";
-  headline: string;
-  sub?: string;
-  raw?: unknown;
-  children?: React.ReactNode;
-}) {
-  const skin = {
-    ok: "bg-[var(--ok-bg)] border-[var(--ok-line)]",
-    bad: "bg-[var(--bad-bg)] border-[var(--bad-line)]",
-    warn: "bg-[var(--warn-bg)] border-[var(--warn-line)]",
-    neutral: "bg-[var(--surface)] border-[var(--line)]",
-  } as const;
-  const accent = {
-    ok: "var(--ok)",
-    bad: "var(--bad)",
-    warn: "var(--warn)",
-    neutral: "var(--ink)",
-  } as const;
-
-  return (
-    <div className={`fade-up mt-6 border p-7 ${skin[tone]}`}>
-      <div className="eyebrow" style={{ color: accent[tone] }}>
-        Verdict
-      </div>
-      {/*
-        Large and serif on purpose. The verdict is the only thing on screen
-        that matters, and every failure in this system reads as a denial —
-        so it needs to be unmissable which one you got.
-      */}
-      <div
-        className="display mt-2 text-[46px] leading-[0.95] sm:text-[62px]"
-        style={{ color: accent[tone] }}
-      >
-        {headline}
-      </div>
-      {sub && (
-        <p className="serif mt-3 max-w-lg text-[15px] leading-relaxed text-[var(--muted)]">{sub}</p>
-      )}
-      {children}
-      {raw != null && (
-        <details className="mt-5">
-          <summary className="eyebrow cursor-pointer transition hover:text-[var(--ink)]">
-            Raw operator response
-          </summary>
-          <pre className="mono mt-2.5 max-h-72 overflow-auto border border-[var(--line)] bg-[var(--raised)] p-3.5 text-[11px] leading-relaxed">
-            {asText(raw)}
-          </pre>
-        </details>
-      )}
+    <div
+      className={`flex items-baseline justify-between gap-6 ${
+        bare ? "py-1" : "border-b border-[var(--line)] py-3"
+      }`}
+    >
+      <dt className="eyebrow shrink-0">{k}</dt>
+      <dd className={`truncate text-right text-[13px] ${mono ? "mono" : "serif"}`}>{v}</dd>
     </div>
   );
 }
@@ -485,4 +514,25 @@ function extractAllow(result: any): boolean | undefined {
 
 function extractReason(result: any): string | undefined {
   return result?.evaluation_result?.reason ?? result?.result?.reason ?? result?.reason ?? undefined;
+}
+
+/**
+ * The named deny reasons, when the operator returns them.
+ *
+ * Shown only if actually present. Inventing a plausible-looking reason when
+ * the response does not carry one would make a denial look better explained
+ * than it is — and in this system every failure, including bugs, arrives as a
+ * denial.
+ */
+function extractDenySet(result: any): string[] {
+  const candidates = [
+    result?.evaluation_result?.deny,
+    result?.evaluation_result?.result?.deny,
+    result?.result?.deny,
+    result?.deny,
+  ];
+  for (const c of candidates) {
+    if (Array.isArray(c) && c.every((x) => typeof x === "string")) return c;
+  }
+  return [];
 }
