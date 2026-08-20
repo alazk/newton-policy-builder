@@ -108,6 +108,64 @@ details summary {
   }
 }
 
+/*
+ * The verdict arriving, in sequence.
+ *
+ * The rule draws across first, then the headline, then the reasons. A card
+ * that fades in as one block reads as content being swapped; drawing the rule
+ * first makes it read as a decision being reached — and the rule is the thing
+ * carrying the colour, so it is the right element to commit first.
+ */
+@keyframes ruleDraw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Slightly longer than a rule would need: it is now a full card of colour
+   wiping across, and the same duration read as abrupt at that size. */
+.dc-rule {
+  animation-duration: 0.5s;
+}
+
+@keyframes verdictIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.dc-rule {
+  transform-origin: left center;
+  animation: ruleDraw 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.dc-verdict > * {
+  animation: verdictIn 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: 0.2s;
+}
+
+/* Each reason lands just after the last rather than the set appearing at
+   once. */
+.dc-chip {
+  animation: verdictIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dc-rule,
+  .dc-verdict > *,
+  .dc-chip {
+    animation: none;
+  }
+}
+
 @keyframes fadeUp {
   from {
     opacity: 0;
@@ -132,10 +190,9 @@ details summary {
  * The primary action inverts, slowly, once its prerequisites are met.
  *
  * A ring pulse was too subtle to notice. This swaps the fill and the type
- * together so the button reads at both ends of the cycle, with a permanent
- * 3px frame so the light half still has an edge. Animations outrank inline
- * styles in the cascade, which is what lets this override the button's own
- * background.
+ * together so the button reads at both ends of the cycle. Animations outrank
+ * inline styles in the cascade, which is what lets this override the button's
+ * own background.
  */
 /* Indeterminate progress. We cannot know how far along a quorum is, so the
    bar reports "working", not a fraction — a fake percentage would be a
@@ -149,27 +206,54 @@ details summary {
   }
 }
 
-@keyframes readyBlink {
-  0%,
-  100% {
-    background: #000000;
-    color: #faf9f6;
+/*
+ * A band of light crosses the primary action once it becomes available.
+ *
+ * Replaces a black/white blink, which flashed hard enough to pull the eye off
+ * whatever you were reading. The fill never changes here — only a highlight
+ * moves across it — so the button stays legible throughout.
+ *
+ * Runs continuously with a pause between passes, so it stays a live signal
+ * without strobing.
+ */
+@keyframes readySweep {
+  /* The gap: the band sits off-canvas for the back half of the cycle, which
+     is what stops a continuous animation feeling frantic. */
+  0% {
+    transform: translateX(-190%) skewX(-18deg);
   }
-  50% {
-    background: #faf9f6;
-    color: #000000;
+  70%,
+  100% {
+    transform: translateX(700%) skewX(-18deg);
   }
 }
 
 .dc-ready {
-  border: 3px solid #000000;
-  animation: readyBlink 2.6s ease-in-out infinite;
+  position: relative;
+  overflow: hidden;
 }
 
-/* Anyone who has asked the OS for less motion should not get a pulsing
+.dc-ready::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 26%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.16) 25%,
+    rgba(255, 255, 255, 0.72) 50%,
+    rgba(255, 255, 255, 0.16) 75%,
+    transparent
+  );
+  animation: readySweep 4.2s cubic-bezier(0.45, 0, 0.3, 1) infinite;
+  pointer-events: none;
+}
+
+/* Anyone who has asked the OS for less motion should not get a moving
    call-to-action. */
 @media (prefers-reduced-motion: reduce) {
-  .dc-ready,
+  .dc-ready::after,
   .pulse {
     animation: none;
   }
@@ -200,11 +284,11 @@ details summary {
 /*
  * Visible focus. The design has none, but every control here is a <button>
  * and a keyboard user needs to see where they are. Offset inward so it does
- * not collide with the 3px frames.
+ * not collide with the frames.
  */
 .dc-reset:focus-visible {
-  outline: 3px solid #c2621a;
-  outline-offset: -6px;
+  outline: 2px solid #c2621a;
+  outline-offset: -4px;
 }
 
 /*
@@ -226,7 +310,7 @@ details summary {
   .dc-rail {
     width: 100% !important;
     border-left: none !important;
-    border-top: 3px solid #000000 !important;
+    border-top: 2px solid #000000 !important;
   }
   /* The 50vw inner width only makes sense beside a second column. */
   .dc-rail-inner {
