@@ -64,14 +64,14 @@ const MONO = "ui-monospace,SFMono-Regular,Menlo,monospace";
  * Sized for the tallest content — verdict headline, deny chips, explorer
  * button — so neither card resizes and the two columns stay level.
  */
-const CARD_H = 178;
+const CARD_H = 138;
 
 /**
  * One spacing scale for both columns, so boxes on the left and right land on
  * the same lines. Previously each column had its own gaps and they drifted
  * apart by a few pixels at every step.
  */
-const PAD = "32px 48px 36px";
+const PAD = "20px 48px 24px";
 
 /**
  * Fixed row heights, so the two columns can be aligned by arithmetic instead
@@ -85,13 +85,13 @@ const PAD = "32px 48px 36px";
 const ROW_H = 48; // every box in the tool is this tall
 const FIELD_H = ROW_H; // named separately only because the offsets read better
 const ACTION_H = ROW_H; // so the action and the last disclosure share both edges
-const LINE_H = 20; // one line of helper text
+const LINE_H = 14; // one line of helper text
 
 /** Inside a box: icon to text, label to value. */
-const TIGHT = 10;
+const TIGHT = 6;
 
 /** Inside a group: head to first box, and between rows of one step. */
-const HEAD_GAP = 14;
+const HEAD_GAP = 10;
 
 /**
  * Between groups — and, not coincidentally, between the disclosures opposite.
@@ -107,7 +107,7 @@ const HEAD_GAP = 14;
  * "Or try one of these" can come back — the space it needs is the same space
  * the layout now uses everywhere.
  */
-const COL_GAP = LINE_H + 2 * HEAD_GAP; // 48
+const COL_GAP = LINE_H + 2 * HEAD_GAP; // 34
 
 /**
  * One stroke weight for the whole tool.
@@ -374,7 +374,7 @@ export default function Wizard() {
           alignItems: "center",
           justifyContent: "space-between",
           gap: COL_GAP,
-          padding: "20px 48px",
+          padding: "16px 48px",
           borderBottom: RULE,
           flexWrap: "wrap",
         }}
@@ -455,7 +455,7 @@ export default function Wizard() {
                 transition: "background 0.18s ease, color 0.18s ease",
               }}
             >
-              <div style={{ padding: "20px 22px", display: "flex", flexDirection: "column", gap: TIGHT, flex: 1 }}>
+              <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: TIGHT, flex: 1 }}>
                 <div style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 22, lineHeight: 1.1 }}>
                   Sanctions Screening
                 </div>
@@ -479,7 +479,7 @@ export default function Wizard() {
                   fontWeight: 700,
                   letterSpacing: "0.14em",
                   textTransform: "uppercase",
-                  padding: "8px 22px",
+                  padding: "6px 20px",
                 }}
               >
                 {policySelected ? "Applied" : "Select"}
@@ -523,12 +523,15 @@ export default function Wizard() {
             {/* Declared heights, because the right column measures itself
                 against these rows. */}
             {showInvalid && (
-              <div style={{ height: LINE_H, lineHeight: `${LINE_H}px`, fontSize: 14, color: "#8E2B1F" }}>
+              <div style={{ height: LINE_H, lineHeight: `${LINE_H}px`, fontSize: 12.5, color: "#8E2B1F" }}>
                 Not a valid 20-byte address.
               </div>
             )}
 
-            <div style={{ height: LINE_H, lineHeight: `${LINE_H}px`, fontSize: 14.5, color: "#5C5C55" }}>
+            {/* Type sized to the 16px line box rather than the other way
+                round, so the row costs exactly LINE_H and COL_GAP stays
+                honest. */}
+            <div style={{ height: LINE_H, lineHeight: `${LINE_H}px`, fontSize: 12.5, color: "#5C5C55" }}>
               Or try one of these:
             </div>
 
@@ -598,7 +601,7 @@ export default function Wizard() {
             {/* A greyed primary button with no explanation reads as broken
                 rather than waiting. */}
             {!ready && !busy && (
-              <div style={{ fontSize: 14, color: "#5C5C55" }}>
+              <div style={{ height: LINE_H, lineHeight: `${LINE_H}px`, fontSize: 12.5, color: "#5C5C55" }}>
                 {!policySelected && !valid
                   ? "Select a policy and enter an address."
                   : !policySelected
@@ -667,7 +670,7 @@ export default function Wizard() {
               >
                 <div
                   style={{
-                    padding: "20px 22px",
+                    padding: "16px 20px",
                     display: "flex",
                     flexDirection: "column",
                     justifyContent: "center",
@@ -736,7 +739,7 @@ export default function Wizard() {
                     fontWeight: 700,
                     letterSpacing: "0.14em",
                     textTransform: "uppercase",
-                    padding: "8px 22px",
+                    padding: "6px 20px",
                   }}
                 >
                   {busy ? "Running" : "Idle"}
@@ -776,7 +779,7 @@ export default function Wizard() {
                   className="dc-verdict"
                   style={{
                     position: "relative",
-                    padding: "20px 22px",
+                    padding: "16px 20px",
                     display: "flex",
                     flexDirection: "column",
                     gap: TIGHT,
@@ -866,7 +869,7 @@ export default function Wizard() {
                         display: "flex",
                         justifyContent: "space-between",
                         gap: TIGHT,
-                        padding: "8px 22px",
+                        padding: "6px 20px",
                         color: "#FAF9F6",
                       }}
                     >
@@ -874,7 +877,7 @@ export default function Wizard() {
                       <span aria-hidden>Newton Explorer ↗</span>
                     </a>
                   ) : (
-                    <div style={{ padding: "8px 22px" }}>Decided</div>
+                    <div style={{ padding: "6px 20px" }}>Decided</div>
                   )}
                 </div>
               </div>
@@ -910,14 +913,18 @@ export default function Wizard() {
             {/* Level with the wallet shortcuts. Drops by one row when the
                 invalid-address message pushes the left column down. */}
             <Expander label="Policy source" offset={showInvalid ? INVALID_SHIFT : 0}>
-              <div style={{ padding: "2px 0" }}>
-                {(
+              <CodeBlock
+                text={rego}
+                header={(
                   [
                     ["PolicyClient", process.env.NEXT_PUBLIC_POLICY_CLIENT ?? ""],
                     ["Oracle", provider?.policyData ?? ""],
                   ] as [string, string][]
                 ).map(([k, addr]) => (
-                  <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: HEAD_GAP, padding: "6px 0" }}>
+                  <div
+                    key={k}
+                    style={{ display: "flex", justifyContent: "space-between", gap: HEAD_GAP, padding: "3px 0" }}
+                  >
                     <span style={{ fontFamily: MONO, fontSize: 11, color: "#5C5C55" }}>{k}</span>
                     {/* Linked, because "deployed" is the strongest claim this
                         page makes and was previously unverifiable text. */}
@@ -935,8 +942,7 @@ export default function Wizard() {
                     )}
                   </div>
                 ))}
-              </div>
-              <CodeBlock text={rego} />
+              />
             </Expander>
 
             {/*
@@ -1030,7 +1036,6 @@ function StepHead({ n, children }: { n: string; children: React.ReactNode }) {
       <div style={{ fontFamily: SANS, fontSize: 12, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase" }}>
         {children}
       </div>
-      <div style={{ flex: 1, height: 2, background: "#000000", opacity: 0.14 }} />
     </div>
   );
 }
@@ -1080,7 +1085,23 @@ function Shortcut({ active, label, onClick }: { active: boolean; label: string; 
  * block pushed the second expander off screen. Copy matters more than height:
  * the raw response is the thing you paste into an issue.
  */
-function CodeBlock({ text, wrap }: { text: string; wrap?: boolean }) {
+function CodeBlock({
+  text,
+  wrap,
+  /**
+   * Rendered inside the frame, above the code.
+   *
+   * The PolicyClient and Oracle rows used to sit loose between the
+   * disclosure header and this box, belonging to neither. They are part of
+   * the same answer as the Rego — this is the policy, these are the
+   * addresses it is deployed at — so they live in the same box.
+   */
+  header,
+}: {
+  text: string;
+  wrap?: boolean;
+  header?: React.ReactNode;
+}) {
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -1095,50 +1116,54 @@ function CodeBlock({ text, wrap }: { text: string; wrap?: boolean }) {
   }
 
   return (
-    <div style={{ position: "relative", marginTop: 8 }}>
-      <button
-        type="button"
-        onClick={copy}
-        disabled={!text}
-        className="dc-reset"
-        style={{
-          position: "absolute",
-          top: 6,
-          right: 6,
-          width: "auto",
-          zIndex: 1,
-          background: "#000000",
-          color: "#FAF9F6",
-          fontFamily: SANS,
-          fontSize: 9.5,
-          fontWeight: 700,
-          letterSpacing: "0.12em",
-          textTransform: "uppercase",
-          padding: "5px 9px",
-          cursor: "pointer",
-          opacity: text ? 1 : 0.3,
-        }}
-      >
-        {copied ? "Copied" : "Copy"}
-      </button>
+    <div style={{ border: RULE, background: "#FFFFFF" }}>
+      {header && <div style={{ padding: "10px 12px 0" }}>{header}</div>}
 
-      <pre
-        style={{
-          margin: 0,
-          maxHeight: 132,
-          overflow: "auto",
-          border: RULE,
-          background: "#FFFFFF",
-          padding: 13,
-          paddingTop: 30,
-          fontFamily: MONO,
-          fontSize: 11,
-          lineHeight: 1.55,
-          whiteSpace: wrap ? "pre-wrap" : "pre",
-        }}
-      >
-        {text}
-      </pre>
+      {/* The copy button is positioned against the code, not the whole box,
+          so a header can use the full width without colliding with it. */}
+      <div style={{ position: "relative" }}>
+        <button
+          type="button"
+          onClick={copy}
+          disabled={!text}
+          className="dc-reset"
+          style={{
+            position: "absolute",
+            top: 6,
+            right: 6,
+            width: "auto",
+            zIndex: 1,
+            background: "#000000",
+            color: "#FAF9F6",
+            fontFamily: SANS,
+            fontSize: 9.5,
+            fontWeight: 700,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            padding: "5px 9px",
+            cursor: "pointer",
+            opacity: text ? 1 : 0.3,
+          }}
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+
+        <pre
+          style={{
+            margin: 0,
+            maxHeight: 132,
+            overflow: "auto",
+            padding: 12,
+            paddingTop: 28,
+            fontFamily: MONO,
+            fontSize: 11,
+            lineHeight: 1.55,
+            whiteSpace: wrap ? "pre-wrap" : "pre",
+          }}
+        >
+          {text}
+        </pre>
+      </div>
     </div>
   );
 }
