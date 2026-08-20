@@ -13,17 +13,8 @@
  *   - both columns fit a normal viewport without scrolling
  */
 
-import { useEffect, useMemo, useState } from "react";
-import {
-  GOALS,
-  PROVIDERS,
-  RULES,
-  generateRego,
-  defaultParams,
-  rulesForProvider,
-  SANCTIONED_TEST_ADDRESS,
-  type Selection,
-} from "@/lib/catalog";
+import { useEffect, useState } from "react";
+import { GOALS, PROVIDERS, SANCTIONED_TEST_ADDRESS } from "@/lib/catalog";
 import { SANCTIONED_POOL } from "@/lib/sanctioned-pool";
 
 /**
@@ -155,6 +146,22 @@ type SharedRun = {
   block: number;
 };
 
+type ScreeningHealth = {
+  ok: boolean;
+  stale: boolean;
+  ageHours: number | null;
+  count: number | null;
+};
+
+/** Resolved from chain: client → policy → policyCid → IPFS. */
+type DeployedPolicy = {
+  source: string;
+  cid: string;
+  entrypoint: string;
+  policyAddress: string;
+  via: string;
+};
+
 type RunState =
   | { status: "idle" }
   | { status: "running" }
@@ -179,14 +186,12 @@ export default function Wizard() {
   const providerId = goal.providers[0];
   const provider = PROVIDERS[providerId];
 
-  const ruleIds = useMemo(
-    () => rulesForProvider(GOAL_ID, providerId).filter((r) => RULES[r]?.defaultOn),
-    [providerId],
-  );
-  const rego = useMemo(() => {
-    const sel: Selection = { goalId: GOAL_ID, providerId, ruleIds, params: defaultParams(ruleIds) };
-    return generateRego(sel);
-  }, [providerId, ruleIds]);
+  /**
+   * The locally composed Rego is no longer rendered — the Policy source panel
+   * shows the deployed policy instead. It is still generated and checkable:
+   *
+   *   npx tsx scripts/emit-rego.mjs && newton-cli regorus parse generated-policy.rego
+   */
 
   const [policySelected, setPolicySelected] = useState(false);
   const [to, setTo] = useState("");
@@ -220,9 +225,42 @@ export default function Wizard() {
     }
   }
 
-  // On arrival, and again after each run once the response has been indexed.
+  /**
+   * The policy as deployed, not as composed here.
+   *
+   * `rego` below is what this page generates. In submit mode it is not what
+   * runs — operators evaluate the policyCid bound to the client on-chain, and
+   * that policy carries two deny rules this builder does not emit. Showing the
+   * local one under a heading that says "Policy source" was a small lie of the
+   * kind that gets expensive.
+   *
+   * Null while loading or on failure. There is no fallback to `rego`: an
+   * unavailable source is reported as unavailable.
+   */
+  const [deployed, setDeployed] = useState<DeployedPolicy | null>(null);
+  const [deployedError, setDeployedError] = useState<string | null>(null);
+
+  /**
+   * Freshness of the list being screened against.
+   *
+   * Null until known. Not defaulted to healthy: the whole point is that a
+   * problem here is invisible, and assuming health while waiting reproduces
+   * that in miniature.
+   */
+  const [health, setHealth] = useState<ScreeningHealth | null>(null);
+
   useEffect(() => {
     loadHistory();
+
+    fetch("/api/policy-source")
+      .then((r) => r.json())
+      .then((j) => (j.ok ? setDeployed(j) : setDeployedError(asText(j.error))))
+      .catch((e) => setDeployedError(asText(e)));
+
+    fetch("/api/screening-health")
+      .then((r) => r.json())
+      .then((j) => setHealth(j.ok ? j : { ok: false, stale: true, ageHours: null, count: null }))
+      .catch(() => setHealth({ ok: false, stale: true, ageHours: null, count: null }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -396,14 +434,46 @@ export default function Wizard() {
             AML / OFAC Policy Engine
           </div>
         </div>
+        {/*
+          The badge reports the freshness of the list, not just the network.
+          A stale ALLOW is indistinguishable from a fresh one at the point of
+          the verdict — this is the only place the difference can show.
+        */}
         <div style={{ display: "flex", alignItems: "center", gap: TIGHT, border: RULE, padding: "6px 13px" }}>
           <span
-            className="pulse"
-            style={{ width: 8, height: 8, borderRadius: "50%", background: "#3F6F55", display: "block" }}
+            className={health?.stale ? undefined : "pulse"}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: health === null ? "#5C5C55" : health.stale ? "#C2621A" : "#3F6F55",
+              display: "block",
+            }}
           />
           <div style={{ fontFamily: SANS, fontSize: 11, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase" }}>
             Ethereum Sepolia
           </div>
+          {health?.stale && (
+            <div
+              title={
+                health.ageHours === null
+                  ? "Could not determine how old the sanctions data is."
+                  : `Sanctions data is ${health.ageHours}h old.`
+              }
+              style={{
+                fontFamily: SANS,
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                color: "#C2621A",
+                borderLeft: "1px solid rgba(0,0,0,0.2)",
+                paddingLeft: TIGHT,
+              }}
+            >
+              {health.ageHours === null ? "Data age unknown" : `Data ${Math.round(health.ageHours)}h old`}
+            </div>
+          )}
         </div>
       </div>
 
@@ -914,10 +984,20 @@ export default function Wizard() {
                 invalid-address message pushes the left column down. */}
             <Expander label="Policy source" offset={showInvalid ? INVALID_SHIFT : 0}>
               <CodeBlock
-                text={rego}
+                text={
+                  deployed?.source ??
+                  (deployedError
+                    ? `Couldn't fetch the deployed policy.\n\n${deployedError}\n\n` +
+                      `This panel shows what the operators run, resolved from the chain.\n` +
+                      `It deliberately does not fall back to the Rego composed in this\n` +
+                      `page — that is a different document, and labelling one as the\n` +
+                      `other is how a display starts disagreeing with reality.`
+                    : "Resolving from chain…")
+                }
                 header={(
                   [
                     ["PolicyClient", process.env.NEXT_PUBLIC_POLICY_CLIENT ?? ""],
+                    ["Policy", deployed?.policyAddress ?? ""],
                     ["Oracle", provider?.policyData ?? ""],
                   ] as [string, string][]
                 ).map(([k, addr]) => (

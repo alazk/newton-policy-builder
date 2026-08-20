@@ -146,10 +146,9 @@ that never happened.
 
 - **Not typechecked.** The Desktop folder isn't reachable from my sandbox. Run
   `npx tsc --noEmit` before you rely on it.
-- **The oracle-backed providers are untested.** Only the params-only path has
-  been exercised. Chainalysis needs an API key; the custom WASM oracle in
-  `../sanctions-oracle/` needs `newton-cli`, whose install host is currently
-  returning HTTP 522.
+- **Chainalysis is untested.** It needs an API key uploaded via
+  `newton-cli secrets upload`. The custom WASM oracle in `../sanctions-oracle/`
+  *is* deployed and verified end to end — see `verify-both.mjs`.
 - **The denylist is a static snapshot.** Five addresses, frozen. Fine for a
   demo, wrong for anything real — that's what the WASM oracle solves.
 
@@ -164,3 +163,14 @@ deny }` Rego fragments that get composed into one policy.
 To go from here to a deployed policy: copy the generated Rego, then
 `newton-cli regorus parse` → `policy-files generate-cids` → `policy deploy`. See
 [../ROADMAP.md](../ROADMAP.md) stage 3.
+
+The CLI installs via `newtup`; latest stable is `v0.5.1`:
+
+```bash
+curl -fsSL https://cli.newton.xyz | sh
+export PATH="$HOME/.newton/bin:$PATH"
+newtup
+newton-cli --version
+```
+
+If `newtup` is already on the path, `newtup` alone updates it.
