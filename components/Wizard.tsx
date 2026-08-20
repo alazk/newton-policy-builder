@@ -215,7 +215,9 @@ export default function Wizard() {
             flexDirection: "column",
             gap: 24,
             overflowY: "auto",
-            transition: "max-width 0.45s ease",
+            // Same curve and duration as the panel, so the two halves move as
+            // one gesture instead of two overlapping ones.
+            transition: "max-width 0.5s cubic-bezier(0.22, 1, 0.36, 1)",
           }}
         >
           {/* 01 — the policy, before the address. The address is this
@@ -362,25 +364,44 @@ export default function Wizard() {
         </div>
 
         {/* ── Right ──────────────────────────────────────────── */}
+        {/*
+          Two elements on purpose.
+
+          The outer one is the shutter: its width animates from 0 and it clips
+          whatever is inside. The inner one is a fixed 50vw at all times, so
+          the contents are laid out at their final size from the first frame
+          and the reveal uncovers finished text instead of reflowing it.
+
+          Putting that fixed width on the outer element — as I did first —
+          makes min-width beat width:0 and the panel never closes at all.
+        */}
         <div
-          className="dc-rail dc-pad"
+          className="dc-rail"
           aria-hidden={!split}
           style={{
             width: split ? "50%" : 0,
             flexShrink: 0,
             overflow: "hidden",
-            // Single property so nothing overrides it: with border-box a
-            // zero-width element still renders its padding, which showed as a
-            // sliver down the right edge.
-            padding: split ? "32px 48px 36px" : 0,
             borderLeft: `${split ? 3 : 0}px solid #000000`,
-            transition: "width 0.45s ease, padding 0.45s ease, border-left-width 0.45s ease",
+            // Decelerating curve — fast off the mark, settling gently. A
+            // linear-feeling ease made the panel look dragged open.
+            transition:
+              "width 0.5s cubic-bezier(0.22, 1, 0.36, 1), border-left-width 0.5s cubic-bezier(0.22, 1, 0.36, 1)",
             background: "#FAF9F6",
-            display: "flex",
-            flexDirection: "column",
-            gap: 20,
           }}
         >
+          <div
+            className={`dc-rail-inner dc-pad${split ? " dc-rail-in" : ""}`}
+            style={{
+              width: "50vw",
+              height: "100%",
+              padding: "32px 48px 36px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 20,
+              overflowY: "auto",
+            }}
+          >
           {/* An invisible copy of the step header opposite, so the two columns
               align by construction rather than by a computed offset. */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -587,6 +608,7 @@ export default function Wizard() {
               </div>
               <CodeBlock text={rego} />
             </Expander>
+          </div>
           </div>
         </div>
       </div>

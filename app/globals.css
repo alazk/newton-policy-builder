@@ -79,6 +79,35 @@ details summary {
   }
 }
 
+/*
+ * The panel reveal.
+ *
+ * The width animation uncovers the panel; the contents fade up slightly after
+ * it, so the eye follows the opening rather than watching text stretch. The
+ * delay is shorter than the width transition on purpose — waiting for the
+ * panel to finish before showing anything felt sluggish.
+ */
+@keyframes railFade {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.dc-rail-in > * {
+  animation: railFade 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.16s both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dc-rail-in > * {
+    animation: none;
+  }
+}
+
 @keyframes fadeUp {
   from {
     opacity: 0;
@@ -198,6 +227,10 @@ details summary {
     width: 100% !important;
     border-left: none !important;
     border-top: 3px solid #000000 !important;
+  }
+  /* The 50vw inner width only makes sense beside a second column. */
+  .dc-rail-inner {
+    width: 100% !important;
   }
   .dc-pad {
     padding: 28px 22px 40px !important;
