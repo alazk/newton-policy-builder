@@ -16,9 +16,12 @@
 :root {
   color-scheme: light;
 
-  --page: #fdfcf7;
-  --rail: #f7f4ea;
-  --raised: #fffefa;
+  /* Bone rather than the design's cream — the original read as yellow at
+     full-page scale, which is a different effect from a warm paper tint on a
+     small card. */
+  --page: #faf9f6;
+  --rail: #faf9f6;
+  --raised: #ffffff;
   --ink: #000000;
   --body: #171714;
   --body-soft: #3a3a34;
@@ -56,7 +59,7 @@ a:hover {
 
 ::selection {
   background: #000;
-  color: #fdfcf7;
+  color: #faf9f6;
 }
 
 details summary::-webkit-details-marker {
@@ -105,14 +108,26 @@ details summary {
  * styles in the cascade, which is what lets this override the button's own
  * background.
  */
+/* Indeterminate progress. We cannot know how far along a quorum is, so the
+   bar reports "working", not a fraction — a fake percentage would be a
+   guess dressed as information. */
+@keyframes loadSlide {
+  0% {
+    transform: translateX(-105%);
+  }
+  100% {
+    transform: translateX(420%);
+  }
+}
+
 @keyframes readyBlink {
   0%,
   100% {
     background: #000000;
-    color: #fdfcf7;
+    color: #faf9f6;
   }
   50% {
-    background: #fdfcf7;
+    background: #faf9f6;
     color: #000000;
   }
 }
@@ -172,9 +187,15 @@ details summary {
  */
 @media (max-width: 900px) {
   .dc-split {
-    grid-template-columns: minmax(0, 1fr) !important;
+    flex-direction: column !important;
+  }
+  /* Stacked, so the rail is full width and only takes space once it has
+     content — matching the desktop behaviour of appearing on first run. */
+  .dc-rail[aria-hidden="true"] {
+    display: none !important;
   }
   .dc-rail {
+    width: 100% !important;
     border-left: none !important;
     border-top: 3px solid #000000 !important;
   }

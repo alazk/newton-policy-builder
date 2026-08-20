@@ -1,17 +1,16 @@
 "use client";
 
 /**
- * Address in, verdict out.
+ * Newton AML/OFAC Policy Engine.
  *
- * Deliberately narrow. Earlier versions offered a source picker, rule toggles
- * and a second "quick test" button; each was a decision the person looking at
- * this has no basis to make, and two of them changed nothing about the
- * on-chain result. What remains is the one action that produces a real,
- * quorum-signed answer.
+ * Select a policy, give it a recipient, enforce it on-chain. Layout and type
+ * are ported from the Policy Engine design file; the logic is not — that file
+ * simulates verdicts, and every result here comes from a Newton operator
+ * quorum evaluating the policy deployed on Sepolia.
  *
- * Layout and type are ported from the Policy Engine design file. The logic is
- * not: that file simulates verdicts. Every number here comes from an operator
- * evaluating the policy deployed on Sepolia.
+ * Two rules the layout obeys, both learned the hard way:
+ *   - cards never change size between states, so nothing jumps mid-demo
+ *   - both columns fit a normal viewport without scrolling
  */
 
 import { useMemo, useState } from "react";
@@ -29,27 +28,32 @@ import {
 
 const GOAL_ID = Object.keys(GOALS)[0];
 
-
 const DISPLAY = "'GT Sectra Display',Georgia,serif";
 const SERIF = "'GT Sectra',Georgia,serif";
 const SANS = "-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif";
 const MONO = "ui-monospace,SFMono-Regular,Menlo,monospace";
 
+/**
+ * Shared by the policy card and every state of the decision card.
+ * Sized for the tallest content — verdict headline, deny chips, explorer
+ * button — so neither card resizes and the two columns stay level.
+ */
+const CARD_H = 178;
+
 type Outcome = {
   headline: string;
-  eyebrow: string;
   reason: string;
   denies: string[];
-  recipient: string;
   explorerUrl?: string | null;
+  evidence: [string, string][];
   raw: unknown;
-  tone: "ok" | "block";
+  tone: "ok" | "block" | "error";
 };
 
 type RunState =
   | { status: "idle" }
   | { status: "running" }
-  | { status: "result"; outcome: Outcome };
+  | { status: "result"; outcome: Outcome; stale?: boolean };
 
 /** Never render an object into the DOM — that's where "[object Object]" comes from. */
 function asText(v: unknown): string {
@@ -74,25 +78,35 @@ export default function Wizard() {
     () => rulesForProvider(GOAL_ID, providerId).filter((r) => RULES[r]?.defaultOn),
     [providerId],
   );
-  const selection: Selection = {
-    goalId: GOAL_ID,
-    providerId,
-    ruleIds,
-    params: defaultParams(ruleIds),
-  };
-  const rego = useMemo(() => generateRego(selection), [providerId, ruleIds]);
+  const rego = useMemo(() => {
+    const sel: Selection = { goalId: GOAL_ID, providerId, ruleIds, params: defaultParams(ruleIds) };
+    return generateRego(sel);
+  }, [providerId, ruleIds]);
 
+  const [policySelected, setPolicySelected] = useState(false);
   const [to, setTo] = useState("");
   const [run, setRun] = useState<RunState>({ status: "idle" });
-
-  // Unselected by default, so the first step is something the user does
-  // rather than something already done for them. The Verify button stays
-  // disabled until a policy is chosen.
-  const [policySelected, setPolicySelected] = useState(false);
 
   const valid = /^0x[a-fA-F0-9]{40}$/.test(to);
   const showInvalid = Boolean(to) && !valid;
   const busy = run.status === "running";
+  const split = run.status !== "idle";
+  const ready = valid && policySelected && !busy;
+
+  /**
+   * Inputs changed. Keep any verdict on screen, marked stale — resetting to
+   * idle collapsed the whole right panel on every keystroke.
+   */
+  function invalidate() {
+    setRun((r) => (r.status === "result" ? { ...r, stale: true } : { status: "idle" }));
+  }
+
+  function failWith(reason: string, raw: unknown) {
+    setRun({
+      status: "result",
+      outcome: { headline: "Couldn't complete", reason, denies: [], evidence: [], raw, tone: "error" },
+    });
+  }
 
   async function verify() {
     setRun({ status: "running" });
@@ -105,55 +119,30 @@ export default function Wizard() {
       const json = await res.json();
 
       if (!res.ok || json.ok === false) {
-        setRun({
-          status: "result",
-          outcome: {
-            headline: "Couldn't complete",
-            eyebrow: "Error",
-            reason: asText(json.error) || "The request failed before a decision was reached.",
-            denies: [],
-            recipient: to,
-            raw: json.raw,
-            tone: "block",
-          },
-        });
+        failWith(asText(json.error) || "The request failed before a decision was reached.", json.raw);
         return;
       }
 
       const allow = extractAllow(json.result);
-      const denies = extractDenies(json.result);
       setRun({
         status: "result",
         outcome: {
           headline: allow === false ? "Non Compliant" : "Compliant",
-          eyebrow: "Verified on-chain · quorum signed",
-          reason:
-            extractReason(json.result) ??
-            (allow === false
-              ? "This address appears on a sanctions list. An operator quorum evaluated the deployed policy and signed a denial."
-              : "This address is not on any sanctions list the policy screens. An operator quorum evaluated the deployed policy and signed an approval."),
-          denies,
-          recipient: to,
+          reason: extractReason(json.result) ?? "",
+          denies: extractDenies(json.result),
           explorerUrl: json.explorerUrl ?? null,
+          evidence: extractEvidence(json.result),
           raw: json.result,
           tone: allow === false ? "block" : "ok",
         },
       });
     } catch (e) {
-      setRun({
-        status: "result",
-        outcome: {
-          headline: "Couldn't complete",
-          eyebrow: "Error",
-          reason: asText(e),
-          denies: [],
-          recipient: to,
-          raw: null,
-          tone: "block",
-        },
-      });
+      failWith(asText(e), null);
     }
   }
+
+  const ruleColor = (t: Outcome["tone"]) => (t === "ok" ? "#3F6F55" : "#C2621A");
+  const typeColor = (t: Outcome["tone"]) => (t === "ok" ? "#2E5A44" : "#C2621A");
 
   return (
     <div
@@ -161,7 +150,7 @@ export default function Wizard() {
       style={{
         height: "100vh",
         overflow: "hidden",
-        background: "#FDFCF7",
+        background: "#FAF9F6",
         color: "#000000",
         fontFamily: SERIF,
         display: "flex",
@@ -176,131 +165,99 @@ export default function Wizard() {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 32,
-          padding: "26px 48px",
+          padding: "20px 48px",
           borderBottom: "3px solid #000000",
           flexWrap: "wrap",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-          {/*
-            The real mark, not Georgia standing in for GT Sectra. Plain <img>
-            rather than next/image: it is a fixed-size decorative logo, so the
-            optimisation pipeline buys nothing and adds a dependency on the
-            image loader working in every deploy target.
-          */}
-          <img
-            src="/newton-logo.svg"
-            alt="Newton"
-            style={{ height: 26, width: "auto", display: "block" }}
-          />
+        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          <img src="/newton-logo.svg" alt="Newton" style={{ height: 26, width: "auto", display: "block" }} />
           <div
             style={{
               background: "#000000",
-              color: "#FDFCF7",
+              color: "#FAF9F6",
               fontFamily: SANS,
-              fontSize: 15,
+              fontSize: 13.5,
               fontWeight: 600,
               letterSpacing: "0.12em",
               textTransform: "uppercase",
-              padding: "10px 16px",
+              padding: "9px 14px",
             }}
           >
             AML / OFAC Policy Engine
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 9, border: "2px solid #000000", padding: "7px 14px" }}>
-          <div
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: "#3F6F55",
-              animation: "pulseDot 1.4s ease-in-out infinite",
-            }}
+        <div style={{ display: "flex", alignItems: "center", gap: 9, border: "2px solid #000000", padding: "6px 13px" }}>
+          <span
+            className="pulse"
+            style={{ width: 8, height: 8, borderRadius: "50%", background: "#3F6F55", display: "block" }}
           />
-          <div style={{ fontFamily: SANS, fontSize: 11.5, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+          <div style={{ fontFamily: SANS, fontSize: 11, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase" }}>
             Ethereum Sepolia
           </div>
         </div>
       </div>
 
-      <div
-        className="dc-split"
-        style={{
-          flex: 1,
-          minHeight: 0,
-          display: "grid",
-          gridTemplateColumns: "minmax(0,1.02fr) minmax(0,1fr)",
-          alignItems: "stretch",
-        }}
-      >
+      <div className="dc-split" style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "stretch" }}>
         {/* ── Left ───────────────────────────────────────────── */}
-        {/* No scroll: the left side is meant to fit on one screen. If content
-            ever outgrows it, tighten the content rather than restoring the
-            scrollbar — a three-step flow that scrolls stops reading as three
-            steps. */}
-        <div className="dc-pad" style={{ padding: "40px 48px 48px", display: "flex", flexDirection: "column", gap: 34 }}>
-          {/*
-            The policy comes first, not the address.
-
-            The page used to open on an input box, which framed this as "look
-            up an address" — a lookup tool. It isn't: a policy module is being
-            applied, and the address is that module's input. Leading with the
-            module, tagged Deployed and footed Applied, makes the relationship
-            legible without adding anything to click.
-          */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <div
+          className="dc-pad"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            width: "100%",
+            // Capped and centred while full-width: steps stretched across a
+            // wide monitor stop reading as a sequence.
+            maxWidth: split ? "none" : 700,
+            marginInline: split ? undefined : "auto",
+            padding: "32px 48px 36px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 24,
+            overflowY: "auto",
+            transition: "max-width 0.45s ease",
+          }}
+        >
+          {/* 01 — the policy, before the address. The address is this
+              module's input, not the subject of the page. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <StepHead n="01">Select a policy</StepHead>
 
-            {/*
-              Clickable, and selected by default. There is one policy, so the
-              click changes nothing — but a card that responds to being pressed
-              reads as a choice you have made rather than a banner you have
-              been shown, which is the distinction that matters here.
-            */}
-            {/*
-              Selection inverts the whole card, not just the foot. A small
-              state change on a large element is easy to miss, and this is the
-              step that gates the rest of the page — if it doesn't read as
-              selected, the disabled Verify button looks broken instead of
-              waiting.
-            */}
             <button
               type="button"
               aria-pressed={policySelected}
-              onClick={() => setPolicySelected((v) => !v)}
+              onClick={() => {
+                setPolicySelected((v) => !v);
+                invalidate();
+              }}
               className={`dc-reset${policySelected ? "" : " dc-hover"}`}
               style={{
                 border: "3px solid #000000",
-                background: policySelected ? "#000000" : "#FDFCF7",
-                color: policySelected ? "#FDFCF7" : "#000000",
+                background: policySelected ? "#000000" : "#FAF9F6",
+                color: policySelected ? "#FAF9F6" : "#000000",
                 display: "flex",
                 flexDirection: "column",
                 cursor: "pointer",
+                minHeight: CARD_H,
               }}
             >
-              <div style={{ padding: "20px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ padding: "20px 22px", display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
                 <div style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 22, lineHeight: 1.1 }}>
                   Sanctions Screening
                 </div>
-
                 {/*
-                  Recipient, not "either party".
-
-                  The deployed policy does screen the sender too, and that is
-                  verified — but this page always sends the same clean sender,
-                  so nothing here exercises it. Claiming both would describe
-                  the policy rather than what this interface does.
+                  Recipient, not "either party". The deployed policy screens the
+                  sender too and that is verified — but this page always sends
+                  the same clean sender, so nothing here exercises it.
                 */}
-                <div style={{ fontSize: 15, lineHeight: 1.45, color: policySelected ? "#FDFCF7" : "#171714" }}>
+                <div style={{ fontSize: 15, lineHeight: 1.45, color: policySelected ? "#FAF9F6" : "#171714" }}>
                   Blocks a transaction if the recipient appears on a sanctions list.
                 </div>
               </div>
 
               <div
                 style={{
-                  // Inverted against an inverted card: a light bar on black.
-                  background: policySelected ? "#FDFCF7" : "transparent",
+                  background: policySelected ? "#FAF9F6" : "transparent",
                   color: policySelected ? "#000000" : "#5C5C55",
                   borderTop: policySelected ? "none" : "1px solid rgba(0,0,0,0.16)",
                   fontFamily: SANS,
@@ -316,15 +273,15 @@ export default function Wizard() {
             </button>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          {/* 02 — recipient */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <StepHead n="02">Add a recipient</StepHead>
-
 
             <input
               value={to}
               onChange={(e) => {
                 setTo(e.target.value.trim());
-                setRun({ status: "idle" });
+                invalidate();
               }}
               spellCheck={false}
               placeholder="0x…"
@@ -332,12 +289,12 @@ export default function Wizard() {
               style={{
                 width: "100%",
                 border: "3px solid #000000",
-                background: "#FFFEFA",
+                background: "#FFFFFF",
                 color: "#000000",
                 fontFamily: MONO,
-                fontSize: 16.5,
+                fontSize: 16,
                 letterSpacing: "-0.015em",
-                padding: "16px 18px",
+                padding: "15px 18px",
                 outline: "none",
               }}
             />
@@ -346,15 +303,13 @@ export default function Wizard() {
 
             <div style={{ fontSize: 14.5, color: "#5C5C55" }}>Or try one of these:</div>
 
-
-            {/* Equal-width columns so neither option reads as the default. */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 10 }}>
               <Shortcut
                 active={to.toLowerCase() === CLEAN_TEST_ADDRESS.toLowerCase()}
                 label="Ordinary wallet"
                 onClick={() => {
                   setTo(CLEAN_TEST_ADDRESS);
-                  setRun({ status: "idle" });
+                  invalidate();
                 }}
               />
               <Shortcut
@@ -362,54 +317,39 @@ export default function Wizard() {
                 label="Sanctioned wallet"
                 onClick={() => {
                   setTo(SANCTIONED_TEST_ADDRESS);
-                  setRun({ status: "idle" });
+                  invalidate();
                 }}
               />
             </div>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-            <StepHead n="03">Enforcement</StepHead>
-
+          {/* The action. No step number: the other two are decisions, this is
+              what they lead to. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <button
               type="button"
               onClick={verify}
-              disabled={!valid || busy || !policySelected}
-              // Deselecting the policy disables enforcement. Otherwise the
-              // selection would be decorative, which is worse than not
-              // offering it.
-              // Pulses only while it is ready and unused — once there is a
-              // verdict on screen the prompt has done its job and becomes
-              // noise.
-              className={`dc-reset dc-primary${
-                !valid || busy || !policySelected
-                  ? " dc-disabled"
-                  : run.status === "idle"
-                    ? " dc-ready"
-                    : ""
-              }`}
+              disabled={!ready}
+              className={`dc-reset dc-primary${!ready ? " dc-disabled" : run.status === "idle" ? " dc-ready" : ""}`}
               style={{
                 background: "#000000",
-                color: "#FDFCF7",
+                color: "#FAF9F6",
                 textAlign: "center",
                 cursor: "pointer",
                 fontFamily: SANS,
-                fontSize: 14.5,
+                fontSize: 14,
                 fontWeight: 600,
                 letterSpacing: "0.05em",
                 textTransform: "uppercase",
-                padding: "19px 24px",
+                padding: "17px 24px",
               }}
             >
               Verify policy onchain
             </button>
 
-            {/*
-              Say what is missing. A greyed primary button with no explanation
-              reads as broken rather than waiting, and on first load both
-              prerequisites are unmet.
-            */}
-            {(!policySelected || !valid) && !busy && (
+            {/* A greyed primary button with no explanation reads as broken
+                rather than waiting. */}
+            {!ready && !busy && (
               <div style={{ fontSize: 14, color: "#5C5C55" }}>
                 {!policySelected && !valid
                   ? "Select a policy and enter an address."
@@ -423,243 +363,229 @@ export default function Wizard() {
 
         {/* ── Right ──────────────────────────────────────────── */}
         <div
-          className="dc-rail dc-pad dc-scroll"
+          className="dc-rail dc-pad"
+          aria-hidden={!split}
           style={{
-            borderLeft: "3px solid #000000",
-            background: "#F7F4EA",
-            padding: "44px 48px 60px",
+            width: split ? "50%" : 0,
+            flexShrink: 0,
+            overflow: "hidden",
+            // Single property so nothing overrides it: with border-box a
+            // zero-width element still renders its padding, which showed as a
+            // sliver down the right edge.
+            padding: split ? "32px 48px 36px" : 0,
+            borderLeft: `${split ? 3 : 0}px solid #000000`,
+            transition: "width 0.45s ease, padding 0.45s ease, border-left-width 0.45s ease",
+            background: "#FAF9F6",
             display: "flex",
             flexDirection: "column",
-            gap: 26,
-            overflowY: "auto",
+            gap: 20,
           }}
         >
-          {/*
-            The panel is never empty.
-
-            It used to show "No decision yet" — a large card whose only job was
-            to say nothing had happened, leaving half the screen as a waiting
-            room. Now it states the decision that is ABOUT to be made, in the
-            same shape the verdict will take, so pressing the button fills the
-            card in rather than replacing a placeholder. The facts underneath
-            stay put across all three states.
-          */}
-          {run.status !== "result" && (
-            <div
-              style={{
-                border: "3px solid #000000",
-                borderTop: "12px solid rgba(0,0,0,0.16)",
-                background: "#FDFCF7",
-                padding: "30px 34px 34px",
-                display: "flex",
-                flexDirection: "column",
-                gap: 14,
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  fontFamily: SANS,
-                  fontSize: 11.5,
-                  fontWeight: 700,
-                  letterSpacing: "0.14em",
-                  textTransform: "uppercase",
-                  color: "#5C5C55",
-                }}
-              >
-                {busy && (
-                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#000000", animation: "pulseDot 1s ease-in-out infinite" }} />
-                )}
-                <div>{busy ? "Awaiting quorum" : "Pending decision"}</div>
-              </div>
-
-              <div
-                style={{
-                  fontFamily: DISPLAY,
-                  fontWeight: 300,
-                  fontSize: 44,
-                  lineHeight: 1.02,
-                  letterSpacing: "-0.02em",
-                  color: busy ? "#000000" : "#5C5C55",
-                }}
-              >
-                {busy ? "Screening" : "Not yet decided"}
-              </div>
-
-              {busy && (
-                <div style={{ fontSize: 16, lineHeight: 1.45, color: "#3A3A34", maxWidth: "46ch" }}>
-                  Independent operators are each evaluating the policy and signing their result.
-                  The signatures are being aggregated.
-                </div>
-              )}
+          {/* An invisible copy of the step header opposite, so the two columns
+              align by construction rather than by a computed offset. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div aria-hidden style={{ visibility: "hidden" }}>
+              <StepHead n="00">Spacer</StepHead>
             </div>
-          )}
 
-          {run.status === "result" && (
-            <div
-              style={{
-                border: "3px solid #000000",
-                borderTop: `12px solid ${run.outcome.tone === "ok" ? "#3F6F55" : "#C2621A"}`,
-                background: "#FDFCF7",
-                padding: "30px 34px 34px",
-                display: "flex",
-                flexDirection: "column",
-                gap: 14,
-                animation: "fadeUp 0.24s ease-out both",
-              }}
-            >
+            {run.status !== "result" ? (
               <div
                 style={{
-                  fontFamily: DISPLAY,
-                  fontWeight: 700,
-                  fontSize: 44,
-                  lineHeight: 0.95,
-                  letterSpacing: "-0.03em",
-                  color: run.outcome.tone === "ok" ? "#2E5A44" : "#C2621A",
+                  border: "3px solid #000000",
+                  background: "#FAF9F6",
+                  padding: "22px 26px",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "center",
+                  gap: 10,
+                  minHeight: CARD_H,
                 }}
               >
-                {run.outcome.headline}
-              </div>
-              <div style={{ fontSize: 16.5, lineHeight: 1.45, color: "#171714", maxWidth: "46ch" }}>
-                {run.outcome.reason}
-              </div>
-
-              {run.outcome.denies.length > 0 && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
-                  {run.outcome.denies.map((d) => (
-                    <div key={d} style={{ fontFamily: MONO, fontSize: 12, border: "2px solid #C2621A", color: "#C2621A", padding: "5px 9px" }}>
-                      {d}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {run.outcome.explorerUrl && (
-                <a
-                  href={run.outcome.explorerUrl}
-                  target="_blank"
-                  rel="noreferrer"
+                <div
                   style={{
-                    alignSelf: "flex-start",
-                    background: "#000000",
-                    color: "#FDFCF7",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
                     fontFamily: SANS,
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    letterSpacing: "0.08em",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: "0.14em",
                     textTransform: "uppercase",
-                    padding: "12px 16px",
-                    marginTop: 4,
+                    color: "#5C5C55",
                   }}
                 >
-                  View on Newton Explorer ↗
-                </a>
-              )}
+                  {busy && (
+                    <span
+                      className="pulse"
+                      style={{ width: 8, height: 8, borderRadius: "50%", background: "#000000", display: "block" }}
+                    />
+                  )}
+                  {busy ? "Awaiting quorum" : "Pending decision"}
+                </div>
+
+                <div
+                  style={{
+                    fontFamily: DISPLAY,
+                    fontWeight: 300,
+                    fontSize: 34,
+                    lineHeight: 1.02,
+                    letterSpacing: "-0.02em",
+                    color: busy ? "#000000" : "#5C5C55",
+                  }}
+                >
+                  {busy ? "Screening" : "Not yet decided"}
+                </div>
+
+                {/* Indeterminate on purpose: there is no progress figure to
+                    report from a quorum, and a moving percentage would be
+                    invented information. */}
+                {busy && (
+                  <div style={{ height: 6, background: "rgba(0,0,0,0.12)", overflow: "hidden", marginTop: 2 }}>
+                    <div
+                      style={{
+                        height: "100%",
+                        width: "22%",
+                        background: "#000000",
+                        animation: "loadSlide 1.5s ease-in-out infinite",
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div
+                style={{
+                  border: "3px solid #000000",
+                  borderTop: `12px solid ${ruleColor(run.outcome.tone)}`,
+                  background: "#FAF9F6",
+                  padding: "20px 26px 24px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                  minHeight: CARD_H,
+                  animation: "fadeUp 0.24s ease-out both",
+                  // Faded, not removed: the verdict was real, it just no
+                  // longer describes what is in the form.
+                  opacity: run.stale ? 0.4 : 1,
+                  transition: "opacity 0.2s ease",
+                }}
+              >
+                {run.stale && <Eyebrow>Inputs changed · run again</Eyebrow>}
+
+                <div
+                  style={{
+                    fontFamily: DISPLAY,
+                    fontWeight: 700,
+                    fontSize: 38,
+                    lineHeight: 0.95,
+                    letterSpacing: "-0.03em",
+                    color: typeColor(run.outcome.tone),
+                  }}
+                >
+                  {run.outcome.headline}
+                </div>
+
+                {/* Prose only where it is the sole explanation. For a verdict
+                    the headline says it, and the deny chip says why. */}
+                {run.outcome.tone === "error" && (
+                  <div style={{ fontSize: 14.5, lineHeight: 1.45, color: "#171714", maxWidth: "44ch" }}>
+                    {run.outcome.reason}
+                  </div>
+                )}
+
+                {run.outcome.denies.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+                    {run.outcome.denies.map((d) => (
+                      <span
+                        key={d}
+                        style={{
+                          fontFamily: MONO,
+                          fontSize: 11.5,
+                          border: `2px solid ${typeColor(run.outcome.tone)}`,
+                          color: typeColor(run.outcome.tone),
+                          padding: "4px 8px",
+                        }}
+                      >
+                        {d}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {run.outcome.explorerUrl && (
+                  <a
+                    href={run.outcome.explorerUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      marginTop: "auto",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      background: "#000000",
+                      color: "#FAF9F6",
+                      fontFamily: SANS,
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      letterSpacing: "0.1em",
+                      textTransform: "uppercase",
+                      padding: "12px 16px",
+                    }}
+                  >
+                    <span>View attestation</span>
+                    <span aria-hidden style={{ letterSpacing: 0 }}>
+                      Newton Explorer ↗
+                    </span>
+                  </a>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Evidence, not a restatement. These come from the operator
+              response and exist nowhere else on the page. */}
+          {run.status === "result" && run.outcome.evidence.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {run.outcome.evidence.map(([k, v]) => (
+                <Fact key={k} k={k} v={v} />
+              ))}
             </div>
           )}
 
-          {/*
-            What is being checked, stated before the run and unchanged after
-            it. Constant across states so the panel reads as one continuous
-            thing filling in, rather than three cards swapping places.
-          */}
           <div style={{ display: "flex", flexDirection: "column" }}>
-            <Fact k="Policy" v={policySelected ? "Sanctions Screening" : "None selected"} />
-            <Fact k="Lists" v="OFAC · EU · UN · UK" />
-            <Fact k="Address" v={to ? shortAddr(to) : "Not entered"} mono />
-          </div>
-
-          {/* Directly under the facts, not pinned to the bottom — the rail is
-              taller than the content and the gap read as a mistake. */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
             <Expander label="Raw operator response +" disabled={run.status !== "result"}>
-              <pre
-                style={{
-                  margin: "12px 0 0",
-                  maxHeight: 220,
-                  overflow: "auto",
-                  border: "2px solid #000000",
-                  background: "#FFFEFA",
-                  padding: 14,
-                  fontFamily: MONO,
-                  fontSize: 11.5,
-                  lineHeight: 1.55,
-                  whiteSpace: "pre-wrap",
-                }}
-              >
-                {run.status === "result" ? asText(run.outcome.raw) : ""}
-              </pre>
+              <CodeBlock text={run.status === "result" ? asText(run.outcome.raw) : ""} wrap />
             </Expander>
 
             <Expander label="Policy source +">
-              <div style={{ padding: "4px 0" }}>
+              <div style={{ padding: "2px 0" }}>
                 {(
                   [
-                    [
-                      "PolicyClient",
-                      shortAddr(process.env.NEXT_PUBLIC_POLICY_CLIENT ?? ""),
-                      process.env.NEXT_PUBLIC_POLICY_CLIENT ?? "",
-                    ],
-                    [
-                      "Oracle",
-                      provider?.policyData ? shortAddr(provider.policyData) : "params only",
-                      provider?.policyData ?? "",
-                    ],
-                    ["Reads", `${provider?.dataPath}.*`, ""],
-                  ] as [string, string, string][]
-                ).map(([k, v, addr]) => (
-                  <div key={k} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 18, padding: "8px 0" }}>
-                    <div style={{ fontFamily: MONO, fontSize: 11.5, color: "#5C5C55", whiteSpace: "nowrap" }}>{k}</div>
-                    {/*
-                      Linked to Etherscan where there is a contract behind it.
-                      "Deployed" is the strongest claim this page makes and it
-                      was previously unverifiable text — one click to check it
-                      is worth more than another sentence asserting it.
-                    */}
+                    ["PolicyClient", process.env.NEXT_PUBLIC_POLICY_CLIENT ?? ""],
+                    ["Oracle", provider?.policyData ?? ""],
+                  ] as [string, string][]
+                ).map(([k, addr]) => (
+                  <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 18, padding: "6px 0" }}>
+                    <span style={{ fontFamily: MONO, fontSize: 11, color: "#5C5C55" }}>{k}</span>
+                    {/* Linked, because "deployed" is the strongest claim this
+                        page makes and was previously unverifiable text. */}
                     {addr ? (
                       <a
                         href={`https://sepolia.etherscan.io/address/${addr}`}
                         target="_blank"
                         rel="noreferrer"
-                        style={{
-                          fontFamily: MONO,
-                          fontSize: 11.5,
-                          color: "#171714",
-                          textDecoration: "underline",
-                          textUnderlineOffset: 3,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
+                        style={{ fontFamily: MONO, fontSize: 11, textDecoration: "underline", textUnderlineOffset: 3 }}
                       >
-                        {v} ↗
+                        {shortAddr(addr)} ↗
                       </a>
                     ) : (
-                      <div style={{ fontFamily: MONO, fontSize: 11.5, color: "#171714", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {v}
-                      </div>
+                      <span style={{ fontFamily: MONO, fontSize: 11 }}>—</span>
                     )}
                   </div>
                 ))}
               </div>
-              <pre
-                style={{
-                  margin: "8px 0 0",
-                  maxHeight: 230,
-                  overflow: "auto",
-                  border: "2px solid #000000",
-                  background: "#FFFEFA",
-                  padding: 16,
-                  fontFamily: MONO,
-                  fontSize: 11.5,
-                  lineHeight: 1.6,
-                  whiteSpace: "pre",
-                }}
-              >
-                {rego}
-              </pre>
+              <CodeBlock text={rego} />
             </Expander>
           </div>
         </div>
@@ -670,40 +596,11 @@ export default function Wizard() {
 
 /* ── Pieces ────────────────────────────────────────────────── */
 
-function Expander({
-  label,
-  children,
-  disabled,
-}: {
-  label: string;
-  children: React.ReactNode;
-  disabled?: boolean;
-}) {
-  return (
-    <details style={{ borderTop: "1px solid rgba(0,0,0,0.16)", padding: "14px 0", opacity: disabled ? 0.4 : 1, pointerEvents: disabled ? "none" : "auto" }}>
-      <summary
-        style={{
-          cursor: "pointer",
-          fontFamily: SANS,
-          fontSize: 11.5,
-          fontWeight: 700,
-          letterSpacing: "0.13em",
-          textTransform: "uppercase",
-          color: "#5C5C55",
-        }}
-      >
-        {label}
-      </summary>
-      {children}
-    </details>
-  );
-}
-
 function StepHead({ n, children }: { n: string; children: React.ReactNode }) {
   return (
     <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
-      <div style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 20, lineHeight: 1 }}>{n}</div>
-      <div style={{ fontFamily: SANS, fontSize: 12.5, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+      <div style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 19, lineHeight: 1 }}>{n}</div>
+      <div style={{ fontFamily: SANS, fontSize: 12, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase" }}>
         {children}
       </div>
       <div style={{ flex: 1, height: 2, background: "#000000", opacity: 0.14 }} />
@@ -711,8 +608,15 @@ function StepHead({ n, children }: { n: string; children: React.ReactNode }) {
   );
 }
 
-/** A row in the persistent "what is being checked" block. */
-function Fact({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ fontFamily: SANS, fontSize: 11, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "#5C5C55" }}>
+      {children}
+    </div>
+  );
+}
+
+function Fact({ k, v }: { k: string; v: string }) {
   return (
     <div
       style={{
@@ -720,14 +624,15 @@ function Fact({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
         alignItems: "baseline",
         justifyContent: "space-between",
         gap: 20,
-        padding: "11px 0",
-        borderBottom: "1px solid rgba(0,0,0,0.16)",
+        padding: "8px 0",
+        // No rule of its own: the expander below already draws one, and two
+        // hairlines a few pixels apart read as a mistake.
       }}
     >
       <div
         style={{
           fontFamily: SANS,
-          fontSize: 10.5,
+          fontSize: 10,
           fontWeight: 700,
           letterSpacing: "0.13em",
           textTransform: "uppercase",
@@ -739,8 +644,8 @@ function Fact({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
       </div>
       <div
         style={{
-          fontFamily: mono ? MONO : SERIF,
-          fontSize: mono ? 12.5 : 14,
+          fontFamily: MONO,
+          fontSize: 12,
           color: "#171714",
           textAlign: "right",
           overflow: "hidden",
@@ -754,28 +659,9 @@ function Fact({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   );
 }
 
-/** A labelled fact about the policy module. `inv` for the selected (black) card. */
-function Attr({ k, v, inv }: { k: string; v: string; inv?: boolean }) {
-  return (
-    <div style={{ display: "flex", gap: 10, fontSize: 13.5, lineHeight: 1.4 }}>
-      <div style={{ color: inv ? "rgba(253,252,247,0.55)" : "#5C5C55", minWidth: 92, flexShrink: 0 }}>{k}</div>
-      <div style={{ color: inv ? "#FDFCF7" : "#171714" }}>{v}</div>
-    </div>
-  );
-}
-
-function Eyebrow({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ fontFamily: SANS, fontSize: 11.5, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "#5C5C55" }}>
-      {children}
-    </div>
-  );
-}
-
 /**
- * Selection is shown by inverting the card rather than by a swatch. With no
- * subtitle there is nothing for a marker to sit against, and a lone square
- * beside two words reads as a checkbox nobody asked for.
+ * Selection changes the fill only. Varying border or padding made the button
+ * resize on click, which reads as a layout glitch rather than a choice.
  */
 function Shortcut({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
@@ -785,22 +671,119 @@ function Shortcut({ active, label, onClick }: { active: boolean; label: string; 
       onClick={onClick}
       className={`dc-reset${active ? "" : " dc-hover"}`}
       style={{
-        // 3px when active, matching the policy card's frame weight, so the
-        // selected state is visible from the border as well as the fill.
-        border: active ? "3px solid #000000" : "2px solid #000000",
+        border: "2px solid #000000",
         background: active ? "#000000" : "transparent",
-        color: active ? "#FDFCF7" : "#000000",
-        padding: active ? "12px 15px" : "13px 16px",
+        color: active ? "#FAF9F6" : "#000000",
+        padding: "12px 16px",
         cursor: "pointer",
         textAlign: "center",
-        fontSize: 15,
-        fontWeight: active ? 700 : 400,
+        fontSize: 14.5,
       }}
     >
       {label}
     </button>
   );
 }
+
+/**
+ * Scrollable code with a copy button in the corner.
+ *
+ * Short on purpose — these are references, not reading material, and a tall
+ * block pushed the second expander off screen. Copy matters more than height:
+ * the raw response is the thing you paste into an issue.
+ */
+function CodeBlock({ text, wrap }: { text: string; wrap?: boolean }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    } catch {
+      // Clipboard needs a secure context and permission; failing silently is
+      // better than an error the user cannot act on.
+    }
+  }
+
+  return (
+    <div style={{ position: "relative", marginTop: 8 }}>
+      <button
+        type="button"
+        onClick={copy}
+        disabled={!text}
+        className="dc-reset"
+        style={{
+          position: "absolute",
+          top: 6,
+          right: 6,
+          width: "auto",
+          zIndex: 1,
+          background: "#000000",
+          color: "#FAF9F6",
+          fontFamily: SANS,
+          fontSize: 9.5,
+          fontWeight: 700,
+          letterSpacing: "0.12em",
+          textTransform: "uppercase",
+          padding: "5px 9px",
+          cursor: "pointer",
+          opacity: text ? 1 : 0.3,
+        }}
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+
+      <pre
+        style={{
+          margin: 0,
+          maxHeight: 132,
+          overflow: "auto",
+          border: "2px solid #000000",
+          background: "#FFFFFF",
+          padding: 13,
+          paddingTop: 30,
+          fontFamily: MONO,
+          fontSize: 11,
+          lineHeight: 1.55,
+          whiteSpace: wrap ? "pre-wrap" : "pre",
+        }}
+      >
+        {text}
+      </pre>
+    </div>
+  );
+}
+
+function Expander({ label, children, disabled }: { label: string; children: React.ReactNode; disabled?: boolean }) {
+  return (
+    <details
+      style={{
+        borderTop: "1px solid rgba(0,0,0,0.16)",
+        padding: "10px 0",
+        opacity: disabled ? 0.4 : 1,
+        pointerEvents: disabled ? "none" : "auto",
+      }}
+    >
+      <summary
+        style={{
+          cursor: "pointer",
+          fontFamily: SANS,
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: "0.13em",
+          textTransform: "uppercase",
+          color: "#5C5C55",
+        }}
+      >
+        {label}
+      </summary>
+      {children}
+    </details>
+  );
+}
+
+/* ── Reading the operator response ─────────────────────────── */
 
 /**
  * The decision lives at evaluation_result.result. Returning undefined rather
@@ -833,4 +816,19 @@ function extractDenies(result: any): string[] {
     if (Array.isArray(c) && c.every((x) => typeof x === "string")) return c;
   }
   return [];
+}
+
+/**
+ * Just the task id.
+ *
+ * Reference block, expiry block and quorum threshold were also here. They are
+ * real, but four rows of them pushed the Policy source expander below the
+ * fold, and anyone who wants those numbers can open the raw response — where
+ * they were all along. The task id earns its place because it is the handle
+ * for the explorer link beside it.
+ */
+function extractEvidence(result: any): [string, string][] {
+  const taskId = result?.task_id ?? result?.taskId;
+  if (typeof taskId !== "string" || !taskId) return [];
+  return [["Task", `${taskId.slice(0, 10)}…${taskId.slice(-6)}`]];
 }
