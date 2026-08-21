@@ -58,6 +58,22 @@ export async function POST(req: Request) {
       cache: "no-store",
     });
 
+    /**
+     * 503 is the screening API refusing to answer on stale data — the same
+     * refusal that makes the on-chain policy deny. Reported as its own
+     * condition, not as a generic failure: the page needs to tell a denial
+     * caused by a designation apart from one caused by not knowing.
+     */
+    if (res.status === 503) {
+      const detail = await res.json().catch(() => null);
+      return NextResponse.json({
+        ok: false,
+        stale: true,
+        ageHours: detail?.ageHours ?? null,
+        error: "Screening data is stale; the service refused to answer.",
+      });
+    }
+
     if (!res.ok) {
       return NextResponse.json({ ok: false, error: `Screening API returned ${res.status}.` }, { status: 502 });
     }

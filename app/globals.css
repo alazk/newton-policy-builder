@@ -94,26 +94,20 @@ a {
 
 /* ── Motion ─────────────────────────────────────────────── */
 
-/* The panel arriving. Drops from the top rather than fading: a decision
-   should feel like it landed. */
-@keyframes peDrop {
-  from {
-    opacity: 0;
-    transform: translateY(-14px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-.pe-drop {
-  animation: peDrop 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-/* The verdict headline uncovered by a clip travelling just behind the sweep,
-   so the words appear to be revealed rather than faded in. */
-@keyframes peReveal {
+/*
+ * How the decision lands.
+ *
+ * The panel used to drop in from the top, which read as one screen being
+ * swapped for another — the same motion a modal makes. But nothing is being
+ * replaced: the stage is a single element that was already there, holding the
+ * console a moment ago. So the colour floods it instead.
+ *
+ * The fill is clipped in from the left, never scaled. Scaling a gradient
+ * stretches it — the angle changes mid-flight and the whole thing reads as
+ * cheap. Clipping moves an edge across a gradient that is already at its
+ * final size.
+ */
+@keyframes peWash {
   from {
     clip-path: inset(0 100% 0 0);
   }
@@ -122,8 +116,44 @@ a {
   }
 }
 
+.pe-wash {
+  animation: peWash 0.66s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* The headline uncovered just behind the wash, so the colour appears to sweep
+   across and leave the answer behind it rather than the two arriving
+   together. */
 .pe-reveal {
-  animation: peReveal 0.62s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
+  animation: peWash 0.6s cubic-bezier(0.22, 1, 0.36, 1) 0.16s both;
+}
+
+/*
+ * Everything under the headline arrives in reading order.
+ *
+ * A verdict, its reason, the lists, then the parties — the sequence is the
+ * order you would say it out loud. Landing them all at once gives the eye no
+ * route through the panel.
+ */
+.pe-seq > * {
+  animation: peRise 0.44s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.pe-seq > *:nth-child(1) {
+  animation-delay: 0.34s;
+}
+.pe-seq > *:nth-child(2) {
+  animation-delay: 0.42s;
+}
+.pe-seq > *:nth-child(3) {
+  animation-delay: 0.5s;
+}
+.pe-seq > *:nth-child(4) {
+  animation-delay: 0.58s;
+}
+.pe-seq > *:nth-child(5) {
+  animation-delay: 0.64s;
+}
+.pe-seq > *:nth-child(n + 6) {
+  animation-delay: 0.7s;
 }
 
 /* A band of light crossing a dark fill or an address in flight. */
@@ -285,14 +315,18 @@ a {
  * the OS for less motion still needs the decision.
  */
 @media (prefers-reduced-motion: reduce) {
-  .pe-drop,
+  .pe-wash,
   .pe-reveal,
   .pe-rise > *,
+  .pe-seq > *,
   .pe-sweep::after,
   .pe-spin,
   .pe-pulse {
     animation: none;
   }
+  /* Cleared explicitly: a cancelled clip animation would otherwise leave the
+     element stuck at its `from` state, which is fully hidden. */
+  .pe-wash,
   .pe-reveal {
     clip-path: none;
   }

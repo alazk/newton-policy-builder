@@ -117,7 +117,19 @@ type Pick = "clean" | "ofac" | null;
 /** Per-party attribution, from the same feed the oracle queried. */
 type Party = { address: string; screened: boolean; sanctioned: boolean | null; datasets: string[] };
 
-type Verdict = "pass" | "block" | "none";
+/**
+ * Four outcomes, because there are four.
+ *
+ *   pass        — neither party designated
+ *   block       — a party is designated
+ *   unavailable — the policy denied because it could not screen. The transfer
+ *                 is blocked and nobody is accused; painting this orange next
+ *                 to the word "Non Compliant" would tell someone their
+ *                 counterparty is on a sanctions list when the truth is that
+ *                 the list was too old to consult.
+ *   none        — no verdict could be read at all
+ */
+type Verdict = "pass" | "block" | "unavailable" | "none";
 
 type Outcome = {
   verdict: Verdict;
@@ -171,6 +183,9 @@ type ScreeningHealth = {
 const FILL: Record<Verdict, string> = {
   pass: "linear-gradient(160deg, #D8FFCA, #A8DCB4)",
   block: "linear-gradient(160deg, #FFE0BF, #EDB887)",
+  // Grey, deliberately. Not knowing is not a finding, and the palette should
+  // not lend it the weight of one.
+  unavailable: "linear-gradient(160deg, #ECECEC, #C9C9C9)",
   none: "linear-gradient(160deg, #FFD6CD, #DFA79C)",
 };
 
@@ -333,7 +348,8 @@ export default function Wizard() {
     if (sendTo !== to) setTo(sendTo);
     if (sendFrom !== from) setFrom(sendFrom);
 
-    if (run.status === "done" && run.outcome.verdict !== "none") {
+    // Only a real screening result is worth comparing against.
+    if (run.status === "done" && (run.outcome.verdict === "pass" || run.outcome.verdict === "block")) {
       setPrev({ verdict: run.outcome.verdict, headline: run.outcome.headline, to, from });
     }
 
@@ -419,10 +435,37 @@ export default function Wizard() {
           body: JSON.stringify({ addresses: [sendTo, sendFrom] }),
         });
         const sj = await s.json();
+
         if (sj.ok) {
           setRun((r) =>
             r.status === "done"
               ? { ...r, outcome: { ...r.outcome, parties: { to: sj.parties[0], from: sj.parties[1] } } }
+              : r,
+          );
+        } else if (sj.stale && !allow) {
+          /**
+           * The denial was the policy failing closed, not a designation.
+           *
+           * The screening service refused this lookup for the same reason it
+           * refused the operators' — the list is too old to consult — so
+           * `screening_unavailable` fired. Reporting that as "Non Compliant"
+           * would tell someone their counterparty is sanctioned when nobody
+           * has been accused of anything.
+           */
+          setRun((r) =>
+            r.status === "done"
+              ? {
+                  ...r,
+                  outcome: {
+                    ...r.outcome,
+                    verdict: "unavailable",
+                    headline: "Screening unavailable",
+                    reason:
+                      sj.ageHours != null
+                        ? `The sanctions list is ${Math.round(sj.ageHours)} hours old, so the policy refused to screen against it. The transfer is blocked. Nobody has been found on a list.`
+                        : "The policy could not screen against a current sanctions list, so it refused. The transfer is blocked. Nobody has been found on a list.",
+                  },
+                }
               : r,
           );
         }
@@ -497,14 +540,13 @@ export default function Wizard() {
         role={run.status === "idle" ? undefined : "status"}
         aria-live={run.status === "idle" ? undefined : "polite"}
         aria-atomic={run.status === "idle" ? undefined : true}
-        className={done ? "pe-drop" : undefined}
         style={{
+          position: "relative",
           flex: 1,
           minHeight: 0,
           borderRadius: R_CARD,
           border: `1px solid ${HAIRLINE}`,
-          background: done ? undefined : SURFACE,
-          backgroundImage: done ? FILL[done.verdict] : undefined,
+          background: SURFACE,
           overflow: "hidden",
           outline: "none",
           opacity: run.status === "done" && run.stale ? 0.45 : 1,
@@ -1160,6 +1202,11 @@ function Decision({
   prev: { verdict: Verdict; headline: string; to: string; from: string } | null;
   stale: boolean;
 }) {
+  /**
+   * The fill is its own layer so it can be clipped in independently of the
+   * text above it — and keyed by verdict so a second run re-runs the wash
+   * rather than swapping colour instantly under a static headline.
+   */
   const p = outcome.parties;
   const flagged: string[] = [];
   if (p?.to?.sanctioned) flagged.push("recipient");
@@ -1183,34 +1230,50 @@ function Decision({
           : null;
 
   return (
-    <div
-      style={{
-        flex: 1,
-        minHeight: 0,
-        overflow: "auto",
-        padding: "clamp(34px, 6vh, 76px) clamp(28px, 4vw, 64px)",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "center",
-      }}
-    >
-      {stale && <div style={{ ...label(10), color: BODY, marginBottom: 14 }}>Inputs changed · run again</div>}
+    <>
+      {/*
+        The colour, as its own layer. Keyed by verdict so a second run replays
+        the wash instead of swapping the fill instantly beneath a headline
+        that is already sitting there.
+      */}
+      <div
+        key={outcome.verdict}
+        aria-hidden
+        className="pe-wash"
+        style={{ position: "absolute", inset: 0, backgroundImage: FILL[outcome.verdict] }}
+      />
 
       <div
-        className="pe-reveal"
         style={{
-          fontFamily: DISPLAY,
-          fontSize: "clamp(52px, 9vw, 104px)",
-          lineHeight: 0.94,
-          letterSpacing: "-0.025em",
+          position: "relative",
+          flex: 1,
+          minHeight: 0,
+          overflow: "auto",
+          padding: "clamp(34px, 6vh, 76px) clamp(28px, 4vw, 64px)",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
         }}
       >
-        {outcome.headline}
-      </div>
+        {stale && <div style={{ ...label(10), color: BODY, marginBottom: 14 }}>Inputs changed · run again</div>}
 
-      <div style={{ fontSize: 18.5, lineHeight: 1.45, color: INK, marginTop: 18, maxWidth: "46ch" }}>
-        {who ? `${who} ${outcome.reason}` : outcome.reason}
-      </div>
+        <div
+          className="pe-reveal"
+          style={{
+            fontFamily: DISPLAY,
+            fontSize: "clamp(52px, 9vw, 104px)",
+            lineHeight: 0.94,
+            letterSpacing: "-0.025em",
+          }}
+        >
+          {outcome.headline}
+        </div>
+
+        {/* Reason, lists, parties — arriving in the order you would say them. */}
+        <div className="pe-seq" style={{ display: "contents" }}>
+        <div style={{ fontSize: 18.5, lineHeight: 1.45, color: INK, marginTop: 18, maxWidth: "46ch" }}>
+          {who ? `${who} ${outcome.reason}` : outcome.reason}
+        </div>
 
       {/*
         The two sources disagreeing is itself the finding.
@@ -1222,6 +1285,19 @@ function Decision({
         must say so rather than print "Non Compliant" above two parties both
         marked Clear and let the reader reconcile it.
       */}
+      {/*
+        Framed as the system working, because it is. A refusal to answer on
+        stale data is the fail-closed path doing its job; read cold, "blocked"
+        looks like a fault.
+      */}
+      {outcome.verdict === "unavailable" && (
+        <div style={{ fontSize: 14.5, lineHeight: 1.5, marginTop: 16, maxWidth: "54ch", opacity: 0.8 }}>
+          This is the policy behaving correctly. A screening service that cannot answer is treated
+          the same as one that is down — the transfer is refused rather than allowed on stale
+          information.
+        </div>
+      )}
+
       {outcome.verdict === "block" && p?.to && p?.from && flagged.length === 0 && (
         <div style={{ fontSize: 14.5, lineHeight: 1.5, marginTop: 14, maxWidth: "52ch", opacity: 0.75 }}>
           The operators denied this transfer, but a lookup against the same list just now finds
@@ -1302,8 +1378,10 @@ function Decision({
       <div style={{ height: 1, background: "rgba(27,27,27,0.16)", margin: "30px 0 22px", maxWidth: 1080 }} />
 
       <div style={{ display: "flex", alignItems: "flex-end", gap: 26, flexWrap: "wrap", maxWidth: 1080 }}>
-        <PartyBlock name="Recipient" address={to} party={p?.to} />
-        <PartyBlock name="Sender" address={from} party={p?.from} />
+        {/* No Designated/Clear tag when nothing was screened — an unscreened
+            address is not a clear one. */}
+        <PartyBlock name="Recipient" address={to} party={outcome.verdict === "unavailable" ? undefined : p?.to} />
+        <PartyBlock name="Sender" address={from} party={outcome.verdict === "unavailable" ? undefined : p?.from} />
 
         {/*
           "Was this address clean" is not answerable; only "was it clean
@@ -1353,8 +1431,10 @@ function Decision({
             View attestation on the Newton explorer ↗
           </a>
         )}
+        </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
