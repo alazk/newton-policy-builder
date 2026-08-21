@@ -1,11 +1,31 @@
+import Link from "next/link";
 import Wizard from "@/components/Wizard";
 
-/**
- * No wrapper. The shell owns the viewport — `min-h-screen bg-white` here
- * fought it: a white page behind a #F1F1F1 console shows as a seam at the
- * bottom edge, and the extra min-height defeats the fixed-height layout the
- * console depends on.
- */
 export default function Home() {
-  return <Wizard />;
+  return (
+    <>
+      <Wizard />
+      <Link
+        href="/case-study"
+        style={{
+          position: "fixed",
+          top: 16,
+          right: 18,
+          zIndex: 50,
+          padding: "9px 14px",
+          border: "1px solid rgba(27,27,27,.16)",
+          borderRadius: 999,
+          background: "rgba(255,255,255,.86)",
+          backdropFilter: "blur(10px)",
+          color: "#1B1B1B",
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontSize: 10,
+          letterSpacing: ".08em",
+          textTransform: "uppercase",
+        }}
+      >
+        Case study
+      </Link>
+    </>
+  );
 }
