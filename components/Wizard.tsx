@@ -3,33 +3,85 @@
 /**
  * Newton AML/OFAC Policy Engine.
  *
- * Select a policy, give it a recipient, enforce it on-chain. Layout and type
- * are ported from the Policy Engine design file; the logic is not — that file
- * simulates verdicts, and every result here comes from a Newton operator
- * quorum evaluating the policy deployed on Sepolia.
+ * The deployed policy already decides correctly — that is verified in both
+ * directions by sanctions-oracle/verify-both.mjs. What this page has to do is
+ * make the decision legible: what was checked, against what, and what happens
+ * next.
  *
- * Two rules the layout obeys, both learned the hard way:
- *   - cards never change size between states, so nothing jumps mid-demo
- *   - both columns fit a normal viewport without scrolling
+ * Structure is three floating cards on a grey field: masthead, stage,
+ * evidence. The stage is one element that changes state rather than three that
+ * take turns — at rest it holds the console, in flight the screening, at the
+ * end the verdict fills it edge to edge.
+ *
+ * Three rules it obeys, each of them paid for:
+ *
+ *   1. Never render a verdict the response did not contain. An unreadable
+ *      answer is "no decision", not "compliant". This page once showed green
+ *      for every submitted task because undefined fell through to the happy
+ *      branch, while the explorer showed the operators' actual denial.
+ *
+ *   2. Never show work that did not happen. One lookup runs against the
+ *      OpenSanctions consolidated collection. The verdict may report per-list
+ *      outcomes — they are true readings of that one result — but the
+ *      screening step does not animate four lists being queried in turn,
+ *      because they are not.
+ *
+ *   3. Never label the composed policy as the enforced one. In submit mode the
+ *      operators evaluate the policyCid bound on-chain, which currently
+ *      carries two deny rules this project's builder does not emit.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GOALS, PROVIDERS, SANCTIONED_TEST_ADDRESS } from "@/lib/catalog";
 import { SANCTIONED_POOL } from "@/lib/sanctioned-pool";
 
+/* ── Tokens ─────────────────────────────────────────────── */
+
+const INK = "#1B1B1B";
+const FIELD = "#F1F1F1";
+const SURFACE = "#FFFFFF";
+const HAIRLINE = "#E2E2E2";
+const CONTROL = "#CCCCCC";
+const BODY = "#4A4A4A";
+const MUTED = "#6B6B6B";
+const MUTED_2 = "#A5A5A5";
+const PASS = "#3F6F55";
+const FLAG = "#C2621A";
+const ERROR = "#8E2B1F";
+
+const DISPLAY = "var(--display)";
+const SANS = "var(--sans)";
+const MONO = "var(--mono)";
+
+const R_CARD = 22;
+const R_INSET = 16;
+const R_PILL = 999;
+
+const GAP = 12;
+const PAGE_PAD = 14;
+
 /**
- * A fresh address on every click, so the buttons do not look like a lookup of
- * two hardcoded cases.
+ * One spacing scale, both axes.
  *
- * Sanctioned draws from a pool verified against the live feed — see
- * sanctions-api/emit-pool.mjs. Drawing from the static OFAC list instead would
- * risk offering a delisted address, which would come back COMPLIANT and make
- * the button contradict its own label.
- *
- * Ordinary is generated at random. A 20-byte address chosen at random is not
- * on any sanctions list, and generating one is more honest than curating a
- * list of "clean" addresses that belong to real people.
+ * The gap between two buttons side by side and the gap between two stacked
+ * rows were different numbers for no reason, which is what makes a grid look
+ * hand-placed. S1 sits inside a control group, S2 between groups, S3 between
+ * columns.
  */
+const S1 = 8;
+const S2 = 14;
+const S3 = 22;
+
+const label = (size = 10): React.CSSProperties => ({
+  fontFamily: SANS,
+  fontSize: size,
+  fontWeight: 600,
+  letterSpacing: "0.15em",
+  textTransform: "uppercase",
+});
+
+/* ── Addresses ──────────────────────────────────────────── */
+
 function randomSanctioned(current: string): string {
   const pool = SANCTIONED_POOL.length ? SANCTIONED_POOL : [SANCTIONED_TEST_ADDRESS];
   const others = pool.filter((a) => a.toLowerCase() !== current.toLowerCase());
@@ -43,131 +95,10 @@ function randomOrdinary(): string {
   return "0x" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-const GOAL_ID = Object.keys(GOALS)[0];
+const isAddress = (a: string) => /^0x[a-fA-F0-9]{40}$/.test(a);
+const middle = (a: string) => (a.length > 24 ? `${a.slice(0, 16)}…${a.slice(-12)}` : a);
+const short = (a: string) => (a && a.length > 16 ? `${a.slice(0, 8)}…${a.slice(-6)}` : a || "—");
 
-const DISPLAY = "'GT Sectra Display',Georgia,serif";
-const SERIF = "'GT Sectra',Georgia,serif";
-const SANS = "-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif";
-const MONO = "ui-monospace,SFMono-Regular,Menlo,monospace";
-
-/**
- * Shared by the policy card and every state of the decision card.
- * Sized for the tallest content — verdict headline, deny chips, explorer
- * button — so neither card resizes and the two columns stay level.
- */
-const CARD_H = 138;
-
-/**
- * One spacing scale for both columns, so boxes on the left and right land on
- * the same lines. Previously each column had its own gaps and they drifted
- * apart by a few pixels at every step.
- */
-const PAD = "20px 48px 24px";
-
-/**
- * Fixed row heights, so the two columns can be aligned by arithmetic instead
- * of by eye.
- *
- * Every row that either column can contain has a declared height here. That
- * is what makes the offsets below exact: without it the heights come from
- * font metrics, which differ between the serif labels on the left and the
- * mono field beside them, and "nearly aligned" is the best anyone can do.
- */
-const ROW_H = 48; // every box in the tool is this tall
-const FIELD_H = ROW_H; // named separately only because the offsets read better
-const ACTION_H = ROW_H; // so the action and the last disclosure share both edges
-const LINE_H = 14; // one line of helper text
-
-/** Inside a box: icon to text, label to value. */
-const TIGHT = 6;
-
-/** Inside a group: head to first box, and between rows of one step. */
-const HEAD_GAP = 10;
-
-/**
- * Between groups — and, not coincidentally, between the disclosures opposite.
- *
- * Derived rather than chosen. The left column puts a line of helper text
- * between the field and the shortcuts; the right column has no such line, so
- * for the two to stay level the right-hand gap must equal everything that row
- * costs: the line itself plus the gap on either side of it.
- *
- * Solve for a single value that works as both, and it falls out exactly:
- * a uniform gap of LINE_H + 2·HEAD_GAP puts every box on the right level with
- * its counterpart on the left, with no bespoke offsets anywhere. Which is why
- * "Or try one of these" can come back — the space it needs is the same space
- * the layout now uses everywhere.
- */
-const COL_GAP = LINE_H + 2 * HEAD_GAP; // 34
-
-/**
- * One stroke weight for the whole tool.
- *
- * Frames were 3px, buttons 2px and separators 1px, which read as three
- * different systems on one screen. Everything that draws a line now draws
- * this one, and the hairline separators are gone rather than thinned —
- * boxes already have edges, so a rule between them was a second answer to a
- * question already settled.
- */
-const BORDER = 2;
-const RULE = `${BORDER}px solid #000000`;
-
-/**
- * The one correction the uniform gap cannot express.
- *
- * An invalid address adds a row on the left that has no counterpart on the
- * right, so everything below it drops by the height of that row plus its
- * gap. Applied to the second disclosure only: margins accumulate, so the
- * third follows it down on its own.
- */
-const INVALID_SHIFT = LINE_H + HEAD_GAP; // 34
-
-type Outcome = {
-  headline: string;
-  reason: string;
-  denies: string[];
-  explorerUrl?: string | null;
-  evidence: [string, string][];
-  raw: unknown;
-  tone: "ok" | "block" | "error";
-};
-
-/**
- * A run as the chain describes it.
- *
- * `pending` is a real third state, not a placeholder: the task manager's own
- * docs are explicit that a withheld response emits nothing, so "no denial" is
- * not the same as "allowed" and must not be drawn as though it were.
- */
-type SharedRun = {
-  taskId: string;
-  address: string;
-  verdict: "allowed" | "denied" | "pending";
-  block: number;
-};
-
-type ScreeningHealth = {
-  ok: boolean;
-  stale: boolean;
-  ageHours: number | null;
-  count: number | null;
-};
-
-/** Resolved from chain: client → policy → policyCid → IPFS. */
-type DeployedPolicy = {
-  source: string;
-  cid: string;
-  entrypoint: string;
-  policyAddress: string;
-  via: string;
-};
-
-type RunState =
-  | { status: "idle" }
-  | { status: "running" }
-  | { status: "result"; outcome: Outcome; stale?: boolean };
-
-/** Never render an object into the DOM — that's where "[object Object]" comes from. */
 function asText(v: unknown): string {
   if (typeof v === "string") return v;
   if (v == null) return "";
@@ -179,7 +110,101 @@ function asText(v: unknown): string {
   }
 }
 
-const shortAddr = (a: string) => (a && a.length > 16 ? `${a.slice(0, 8)}…${a.slice(-6)}` : a || "—");
+/* ── Types ──────────────────────────────────────────────── */
+
+type Pick = "clean" | "ofac" | null;
+
+/** Per-party attribution, from the same feed the oracle queried. */
+type Party = { address: string; screened: boolean; sanctioned: boolean | null; datasets: string[] };
+
+type Verdict = "pass" | "block" | "none";
+
+type Outcome = {
+  verdict: Verdict;
+  headline: string;
+  reason: string;
+  denies: string[];
+  datasets: string[];
+  explorerUrl?: string | null;
+  raw: unknown;
+  /** Filled in after the verdict, from the same feed the oracle queried. */
+  parties?: { to?: Party; from?: Party };
+  /**
+   * When the decision was read.
+   *
+   * A sanctions verdict without a time is incomplete: "was this address clean"
+   * is not a question anyone can answer, only "was it clean *then*". Set at
+   * the moment the response is parsed, so it is never rendered on the server
+   * and never disagrees with the run it describes.
+   */
+  decidedAt: string;
+};
+
+type RunState =
+  | { status: "idle" }
+  | { status: "running" }
+  | { status: "done"; outcome: Outcome; stale?: boolean };
+
+type SharedRun = {
+  taskId: string;
+  address: string;
+  sender?: string;
+  verdict: "allowed" | "denied" | "pending";
+  block: number;
+};
+
+type DeployedPolicy = {
+  source: string;
+  cid: string;
+  entrypoint: string;
+  policyAddress: string;
+  via: string;
+};
+
+type ScreeningHealth = {
+  ok: boolean;
+  stale: boolean;
+  ageHours: number | null;
+  count: number | null;
+};
+
+const FILL: Record<Verdict, string> = {
+  pass: "linear-gradient(160deg, #D8FFCA, #A8DCB4)",
+  block: "linear-gradient(160deg, #FFE0BF, #EDB887)",
+  none: "linear-gradient(160deg, #FFD6CD, #DFA79C)",
+};
+
+/**
+ * The four regimes the consolidated collection covers.
+ *
+ * One lookup runs against all of them, so reporting each on the verdict is a
+ * true reading of a single result — not four queries. The distinction matters
+ * for the screening step, which must not animate them being checked in turn.
+ */
+const REGIMES = ["OFAC", "EU", "UN", "UK"] as const;
+
+const DATASET_REGIME: Record<string, (typeof REGIMES)[number]> = {
+  us_ofac_sdn: "OFAC",
+  us_ofac_cons: "OFAC",
+  eu_fsf: "EU",
+  un_sc_sanctions: "UN",
+  gb_hmt_sanctions: "UK",
+};
+
+const GOAL_ID = Object.keys(GOALS)[0];
+
+/** "21 Aug 2026, 14:32 UTC" — unambiguous month, explicit zone. */
+const stamp = (iso: string) =>
+  new Date(iso).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+  }) + " UTC";
+
+/* ── Page ───────────────────────────────────────────────── */
 
 export default function Wizard() {
   const goal = GOALS[GOAL_ID];
@@ -187,67 +212,82 @@ export default function Wizard() {
   const provider = PROVIDERS[providerId];
 
   /**
-   * The locally composed Rego is no longer rendered — the Policy source panel
-   * shows the deployed policy instead. It is still generated and checkable:
+   * Applied by default.
    *
-   *   npx tsx scripts/emit-rego.mjs && newton-cli regorus parse generated-policy.rego
+   * There is one policy, it is mandatory, and nothing happens until it is
+   * selected — a chooser with a single compulsory option is not a choice, it
+   * is a speed bump in front of the thing people came to see. It stays
+   * toggleable, because turning it off and watching the action go unavailable
+   * is the clearest statement that the policy is what authorises the
+   * transfer.
    */
-
-  const [policySelected, setPolicySelected] = useState(false);
-  const [to, setTo] = useState("");
-  const [picked, setPicked] = useState<"clean" | "sanctioned" | null>(null);
-  const [run, setRun] = useState<RunState>({ status: "idle" });
+  const [applied, setApplied] = useState(true);
 
   /**
-   * Previous verdicts, newest first — everyone's, not just this tab's.
-   *
-   * This matters for more than convenience. A policy that denies everything
-   * looks identical to one that works, unless something is visibly allowed
-   * alongside it; a list that resets on reload means most visitors see one
-   * result and no contrast. Read from Sepolia via /api/history, so what is
-   * listed here is the attestation record rather than a local account of it.
+   * Nothing is prefilled. A demo that arrives with an address already in the
+   * box invites you to press the button without reading either field, and the
+   * first thing this page has to establish is what it is screening.
    */
+  const [to, setTo] = useState("");
+  const [from, setFrom] = useState("");
+
+  /**
+   * Which shortcut last filled each field, so the buttons can show state.
+   * Cleared when the address is typed by hand — the shortcut is no longer the
+   * source of what is in the box.
+   */
+  const [toPick, setToPick] = useState<Pick>(null);
+  const [fromPick, setFromPick] = useState<Pick>(null);
+  const [focus, setFocus] = useState<"to" | "from" | null>(null);
+  const [picked, setPicked] = useState<"clean" | "ofac" | null>(null);
+  const [run, setRun] = useState<RunState>({ status: "idle" });
+
   const [history, setHistory] = useState<SharedRun[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [deployed, setDeployed] = useState<DeployedPolicy | null>(null);
+  const [deployedError, setDeployedError] = useState<string | null>(null);
+  const [health, setHealth] = useState<ScreeningHealth | null>(null);
+  const [drawer, setDrawer] = useState<"raw" | "policy" | "runs" | null>(null);
 
-  async function loadHistory() {
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  /** The run before this one, for comparison. The whole demonstration is
+      that clean and sanctioned differ, and you could only see one at a time. */
+  const [prev, setPrev] = useState<{ verdict: Verdict; headline: string; to: string; from: string } | null>(
+    null,
+  );
+
+  const toValid = isAddress(to);
+  const fromValid = isAddress(from);
+  const busy = run.status === "running";
+
+  /**
+   * Either party is enough.
+   *
+   * The policy needs both — an unscreened party is a denial, not a skip — but
+   * that is the policy's problem, not the visitor's. Leave one empty and a
+   * clean address is generated for it at submit time and shown in the result,
+   * so the transfer is complete and the side you care about is the only
+   * variable. Requiring both meant pasting an address you had no opinion
+   * about before you could test the one you did.
+   */
+  const anyFilled = toValid || fromValid;
+  const noneBroken = (!to || toValid) && (!from || fromValid);
+  const ready = applied && anyFilled && noneBroken && !busy;
+
+  const loadHistory = useCallback(async () => {
     try {
       const res = await fetch("/api/history");
       const json = await res.json();
       if (json.ok) {
         setHistory(json.runs ?? []);
         setHistoryError(null);
-      } else {
-        setHistoryError(asText(json.error));
-      }
+      } else setHistoryError(asText(json.error));
     } catch (e) {
       setHistoryError(asText(e));
     }
-  }
-
-  /**
-   * The policy as deployed, not as composed here.
-   *
-   * `rego` below is what this page generates. In submit mode it is not what
-   * runs — operators evaluate the policyCid bound to the client on-chain, and
-   * that policy carries two deny rules this builder does not emit. Showing the
-   * local one under a heading that says "Policy source" was a small lie of the
-   * kind that gets expensive.
-   *
-   * Null while loading or on failure. There is no fallback to `rego`: an
-   * unavailable source is reported as unavailable.
-   */
-  const [deployed, setDeployed] = useState<DeployedPolicy | null>(null);
-  const [deployedError, setDeployedError] = useState<string | null>(null);
-
-  /**
-   * Freshness of the list being screened against.
-   *
-   * Null until known. Not defaulted to healthy: the whole point is that a
-   * problem here is invisible, and assuming health while waiting reproduces
-   * that in miniature.
-   */
-  const [health, setHealth] = useState<ScreeningHealth | null>(null);
+  }, []);
 
   useEffect(() => {
     loadHistory();
@@ -257,931 +297,1318 @@ export default function Wizard() {
       .then((j) => (j.ok ? setDeployed(j) : setDeployedError(asText(j.error))))
       .catch((e) => setDeployedError(asText(e)));
 
+    // Unknown freshness counts as stale, never as healthy-until-proven.
     fetch("/api/screening-health")
       .then((r) => r.json())
       .then((j) => setHealth(j.ok ? j : { ok: false, stale: true, ageHours: null, count: null }))
       .catch(() => setHealth({ ok: false, stale: true, ageHours: null, count: null }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadHistory]);
 
-  const valid = /^0x[a-fA-F0-9]{40}$/.test(to);
-  const showInvalid = Boolean(to) && !valid;
-  const busy = run.status === "running";
-  const split = run.status !== "idle";
-  const ready = valid && policySelected && !busy;
-
-  /**
-   * Inputs changed. Keep any verdict on screen, marked stale — resetting to
-   * idle collapsed the whole right panel on every keystroke.
-   */
+  /** A verdict must never quietly outlive the inputs that produced it. */
   function invalidate() {
-    setRun((r) => (r.status === "result" ? { ...r, stale: true } : { status: "idle" }));
+    setRun((r) => (r.status === "done" ? { ...r, stale: true } : { status: "idle" }));
   }
 
-  /**
-   * `explorerUrl` is optional because some failures happen before a task
-   * exists — but when one does, the link is the most useful thing on screen:
-   * it is the record this page failed to read.
-   */
-  function failWith(reason: string, raw: unknown, explorerUrl?: string | null) {
+  function noDecision(reason: string, raw: unknown, explorerUrl?: string | null) {
     setRun({
-      status: "result",
+      status: "done",
       outcome: {
-        headline: "Couldn't complete",
+        verdict: "none",
+        headline: "No decision",
         reason,
         denies: [],
-        evidence: extractEvidence(raw),
-        raw,
+        datasets: [],
         explorerUrl: explorerUrl ?? null,
-        tone: "error",
+        raw,
+        decidedAt: new Date().toISOString(),
       },
     });
   }
 
   async function verify() {
+    // Whatever was left blank gets a clean address, committed to state so the
+    // result shows exactly what was screened.
+    const sendTo = toValid ? to : randomOrdinary();
+    const sendFrom = fromValid ? from : randomOrdinary();
+    if (sendTo !== to) setTo(sendTo);
+    if (sendFrom !== from) setFrom(sendFrom);
+
+    if (run.status === "done" && run.outcome.verdict !== "none") {
+      setPrev({ verdict: run.outcome.verdict, headline: run.outcome.headline, to, from });
+    }
+
+    const ac = new AbortController();
+    abortRef.current = ac;
     setRun({ status: "running" });
+
     try {
       const res = await fetch("/api/evaluate", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mode: "submit", to, policyDataAddress: provider.policyData, providerId }),
+        signal: ac.signal,
+        body: JSON.stringify({
+          mode: "submit",
+          to: sendTo,
+          from: sendFrom,
+          policyDataAddress: provider.policyData,
+          providerId,
+        }),
       });
       const json = await res.json();
 
       if (!res.ok || json.ok === false) {
-        failWith(asText(json.error) || "The request failed before a decision was reached.", json.raw);
+        noDecision(asText(json.error) || "The request failed before a decision was reached.", json.raw);
         return;
       }
 
-      /**
-       * An operator-level failure is not a verdict. The task can come back
-       * with an error or a set of operator_errors and no attestation at all;
-       * reading that as a decision would put a headline on nothing.
-       */
       const taskError = json.result?.error ?? json.result?.operator_errors?.[0]?.message;
       if (taskError) {
-        failWith(asText(taskError), json.result, json.explorerUrl);
+        noDecision(asText(taskError), json.result, json.explorerUrl);
         return;
       }
 
       const allow = extractAllow(json.result);
 
       /**
-       * Fail closed on an unreadable response.
-       *
-       * This previously read `allow === false ? "Non Compliant" : "Compliant"`,
-       * which quietly turned undefined — no verdict found — into a green
-       * PASS. Combined with extractAllow not understanding createTask's
-       * bytes32, that made every submitted task show Compliant while the
-       * explorer showed the operators' actual answer. A screening tool that
-       * says "allowed" when it does not know is worse than one that breaks.
+       * Fail closed on an unreadable response — the bug this page shipped
+       * once. `allow === false ? block : pass` turned "no verdict found" into
+       * a green pass, and every submitted task read Compliant while the
+       * explorer showed the real answer.
        */
       if (allow === undefined) {
-        failWith(
+        noDecision(
           "The operators answered, but no verdict could be read from the response. " +
-            "Open the attestation in the explorer — that is the authoritative record.",
+            "The transfer stays blocked. Open the attestation — that is the authoritative record.",
           json.result,
           json.explorerUrl,
         );
         return;
       }
 
-      const headline = allow ? "Compliant" : "Non Compliant";
-      const tone: Outcome["tone"] = allow ? "ok" : "block";
-
-      /**
-       * Re-read from chain rather than appending locally.
-       *
-       * Appending would put this run in the list on the page's authority; the
-       * point of the shared feed is that it carries the chain's. The response
-       * is usually indexed by the time this fires, and if it is not, the run
-       * appears on the next load.
-       */
-      loadHistory();
-
       setRun({
-        status: "result",
+        status: "done",
         outcome: {
-          headline,
-          reason: extractReason(json.result) ?? "",
+          verdict: allow ? "pass" : "block",
+          headline: allow ? "Compliant" : "Non Compliant",
+          reason: allow
+            ? "Neither party is designated. The transfer may proceed."
+            : "The transfer is blocked.",
           denies: extractDenies(json.result),
+          datasets: extractDatasets(json.result),
           explorerUrl: json.explorerUrl ?? null,
-          evidence: extractEvidence(json.result),
           raw: json.result,
-          tone,
+          decidedAt: new Date().toISOString(),
         },
       });
+
+      loadHistory();
+
+      /**
+       * Attribution, after the fact.
+       *
+       * The attestation is one bit — it does not say which party tripped or
+       * which list named them, and "a party to this transfer is designated"
+       * is a useless sentence to read on a compliance screen. So we ask the
+       * same feed the oracle asked, per address, and label it as the
+       * explanation it is rather than as the signed claim.
+       */
+      try {
+        const s = await fetch("/api/screen", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ addresses: [sendTo, sendFrom] }),
+        });
+        const sj = await s.json();
+        if (sj.ok) {
+          setRun((r) =>
+            r.status === "done"
+              ? { ...r, outcome: { ...r.outcome, parties: { to: sj.parties[0], from: sj.parties[1] } } }
+              : r,
+          );
+        }
+      } catch {
+        // The verdict stands on its own; attribution is a nicety.
+      }
     } catch (e) {
-      failWith(asText(e), null);
+      // A cancelled run is not a failed one, and must not render as a verdict.
+      if (e instanceof DOMException && e.name === "AbortError") {
+        setRun({ status: "idle" });
+        return;
+      }
+      noDecision(asText(e), null);
+    } finally {
+      abortRef.current = null;
     }
   }
 
-  /**
-   * Pastel fill, saturated type.
-   *
-   * The card is entirely the verdict's colour, but at low saturation so the
-   * page stays readable — a full-strength block of orange next to a bone
-   * background overwhelmed everything around it. The headline and chips then
-   * carry the strong version of the same hue, which keeps the contrast where
-   * the meaning is.
-   */
-  const fillColor = (t: Outcome["tone"]) =>
-    t === "ok" ? "#A8C4AF" : t === "block" ? "#E8B587" : "#DFA79C";
+  useEffect(() => {
+    if (run.status === "done") stageRef.current?.focus();
+  }, [run.status]);
 
-  const inkColor = (t: Outcome["tone"]) =>
-    t === "ok" ? "#2E5A44" : t === "block" ? "#C2621A" : "#8E2B1F";
+  const done = run.status === "done" ? run.outcome : null;
 
   return (
     <div
-      className="dc-page"
+      className="pe-shell"
+      style={{ background: FIELD, padding: PAGE_PAD, gap: GAP }}
+    >
+      <Masthead health={health} />
+
+      {/*
+        Said out loud, not hidden in a title attribute — invisible on touch,
+        invisible to a keyboard, and this is the one failure the system cannot
+        fail closed on. A stale feed still returns a confident ALLOW.
+      */}
+      {health?.stale && (
+        <div
+          role="alert"
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "12px 20px",
+            borderRadius: R_CARD,
+            border: `1px solid ${FLAG}`,
+            background: "#FFF3E6",
+            color: "#7A3D0E",
+            fontSize: 14,
+          }}
+        >
+          <span style={{ ...label(10), color: FLAG }}>
+            {health.ageHours === null ? "Data age unknown" : `Data ${Math.round(health.ageHours)}h old`}
+          </span>
+          <span>
+            Screening may not reflect recent designations. A verdict returned now can be confidently
+            wrong.
+          </span>
+        </div>
+      )}
+
+      {/* The stage. One element; the state changes what fills it. */}
+      {/*
+        The live region is scoped to the run, not the whole stage. Wrapping
+        the console in role="status" meant every keystroke in an address field
+        was announced as a status update.
+      */}
+      <div
+        ref={stageRef}
+        tabIndex={-1}
+        role={run.status === "idle" ? undefined : "status"}
+        aria-live={run.status === "idle" ? undefined : "polite"}
+        aria-atomic={run.status === "idle" ? undefined : true}
+        className={done ? "pe-drop" : undefined}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          borderRadius: R_CARD,
+          border: `1px solid ${HAIRLINE}`,
+          background: done ? undefined : SURFACE,
+          backgroundImage: done ? FILL[done.verdict] : undefined,
+          overflow: "hidden",
+          outline: "none",
+          opacity: run.status === "done" && run.stale ? 0.45 : 1,
+          transition: "opacity 0.2s ease",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {run.status === "idle" && (
+          <Console
+            applied={applied}
+            onApply={() => {
+              setApplied((v) => !v);
+              invalidate();
+            }}
+            to={to}
+            from={from}
+            focus={focus}
+            setFocus={setFocus}
+            onTo={(v) => {
+              setTo(v);
+              setToPick(null);
+              invalidate();
+            }}
+            onFrom={(v) => {
+              setFrom(v);
+              setFromPick(null);
+              invalidate();
+            }}
+            toPick={toPick}
+            fromPick={fromPick}
+            // Each party gets its own pair, so any combination is one click
+            // per side — clean/clean, sanctioned/clean, either direction.
+            onPickTo={(kind) => {
+              setTo(kind === "clean" ? randomOrdinary() : randomSanctioned(to));
+              setToPick(kind);
+              invalidate();
+            }}
+            onPickFrom={(kind) => {
+              setFrom(kind === "clean" ? randomOrdinary() : randomSanctioned(from));
+              setFromPick(kind);
+              invalidate();
+            }}
+            ready={ready}
+            onVerify={verify}
+            toValid={toValid}
+            fromValid={fromValid}
+          />
+        )}
+
+        {run.status === "running" && (
+          <Screening to={to} from={from} onCancel={() => abortRef.current?.abort()} />
+        )}
+
+        {done && (
+          <Decision
+            outcome={done}
+            to={to}
+            from={from}
+            prev={prev}
+            stale={run.status === "done" && Boolean(run.stale)}
+          />
+        )}
+      </div>
+
+      <EvidenceBar
+        open={drawer}
+        setOpen={setDrawer}
+        hasRun={run.status === "done"}
+        raw={run.status === "done" ? asText(run.outcome.raw) : ""}
+        deployed={deployed}
+        deployedError={deployedError}
+        provider={provider}
+        history={history}
+        historyError={historyError}
+        showReset={run.status !== "idle"}
+        onReset={() => {
+          setRun({ status: "idle" });
+          setDrawer(null);
+        }}
+      />
+    </div>
+  );
+}
+
+/* ── Masthead ───────────────────────────────────────────── */
+
+function Masthead({ health }: { health: ScreeningHealth | null }) {
+  const stale = health?.stale ?? false;
+
+  return (
+    <div
+      className="pe-mast"
       style={{
-        height: "100vh",
-        overflow: "hidden",
-        background: "#FAF9F6",
-        color: "#000000",
-        fontFamily: SERIF,
+        flexShrink: 0,
         display: "flex",
-        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 24,
+        padding: "14px 20px",
+        background: SURFACE,
+        border: `1px solid ${HAIRLINE}`,
+        borderRadius: R_CARD,
       }}
     >
-      {/* ── Masthead ─────────────────────────────────────────── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <img src="/newton-logo.svg" alt="Newton" style={{ height: 20, display: "block" }} />
+        <span
+          className="pe-dark"
+          style={{ ...label(10), borderRadius: R_PILL, padding: "8px 14px" }}
+        >
+          AML / OFAC
+        </span>
+      </div>
+
+      {/*
+        Reports the freshness of the list, not just the network. A stale ALLOW
+        is indistinguishable from a fresh one at the moment of the verdict;
+        this is the only place the difference can surface.
+      */}
       <div
-        className="dc-mast"
+        title={
+          health === null
+            ? "Checking how current the sanctions data is…"
+            : health.ageHours === null
+              ? "Could not determine how old the sanctions data is."
+              : `Sanctions data is ${health.ageHours}h old.`
+        }
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
-          gap: COL_GAP,
-          padding: "16px 48px",
-          borderBottom: RULE,
-          flexWrap: "wrap",
+          gap: 9,
+          border: `1px solid ${stale ? FLAG : HAIRLINE}`,
+          borderRadius: R_PILL,
+          padding: "8px 16px",
+          background: FIELD,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: HEAD_GAP }}>
-          <img src="/newton-logo.svg" alt="Newton" style={{ height: 26, width: "auto", display: "block" }} />
-          <div
-            style={{
-              background: "#000000",
-              color: "#FAF9F6",
-              fontFamily: SANS,
-              fontSize: 13.5,
-              fontWeight: 600,
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
-              padding: "9px 14px",
-            }}
-          >
-            AML / OFAC Policy Engine
-          </div>
-        </div>
-        {/*
-          The badge reports the freshness of the list, not just the network.
-          A stale ALLOW is indistinguishable from a fresh one at the point of
-          the verdict — this is the only place the difference can show.
-        */}
-        <div style={{ display: "flex", alignItems: "center", gap: TIGHT, border: RULE, padding: "6px 13px" }}>
-          <span
-            className={health?.stale ? undefined : "pulse"}
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: health === null ? "#5C5C55" : health.stale ? "#C2621A" : "#3F6F55",
-              display: "block",
-            }}
-          />
-          <div style={{ fontFamily: SANS, fontSize: 11, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase" }}>
-            Ethereum Sepolia
-          </div>
-          {health?.stale && (
-            <div
-              title={
-                health.ageHours === null
-                  ? "Could not determine how old the sanctions data is."
-                  : `Sanctions data is ${health.ageHours}h old.`
-              }
-              style={{
-                fontFamily: SANS,
-                fontSize: 11,
-                fontWeight: 600,
-                letterSpacing: "0.12em",
-                textTransform: "uppercase",
-                color: "#C2621A",
-                borderLeft: "1px solid rgba(0,0,0,0.2)",
-                paddingLeft: TIGHT,
-              }}
-            >
-              {health.ageHours === null ? "Data age unknown" : `Data ${Math.round(health.ageHours)}h old`}
-            </div>
-          )}
-        </div>
+        <span
+          className={health === null || stale ? undefined : "pe-pulse"}
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: "50%",
+            background: health === null ? MUTED_2 : stale ? FLAG : PASS,
+            display: "block",
+          }}
+        />
+        <span style={{ ...label(10), color: INK }}>Sepolia</span>
+        {stale && (
+          <span style={{ ...label(10), color: FLAG }}>
+            · {health?.ageHours === null ? "Age unknown" : `${Math.round(health!.ageHours!)}h old`}
+          </span>
+        )}
       </div>
+    </div>
+  );
+}
 
-      <div className="dc-split" style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "stretch" }}>
-        {/* ── Left ───────────────────────────────────────────── */}
-        <div
-          className="dc-pad"
-          style={{
-            flex: 1,
-            minWidth: 0,
-            width: "100%",
-            // Capped and centred while full-width: steps stretched across a
-            // wide monitor stop reading as a sequence.
-            maxWidth: split ? "none" : 700,
-            marginInline: split ? undefined : "auto",
-            padding: PAD,
-            display: "flex",
-            flexDirection: "column",
-            gap: COL_GAP,
-            overflowY: "auto",
-            // Same curve and duration as the panel, so the two halves move as
-            // one gesture instead of two overlapping ones.
-            transition: "max-width 0.5s cubic-bezier(0.22, 1, 0.36, 1)",
-          }}
-        >
-          {/* 01 — the policy, before the address. The address is this
-              module's input, not the subject of the page. */}
-          <div style={{ display: "flex", flexDirection: "column", gap: HEAD_GAP }}>
-            <StepHead n="01">Select a policy</StepHead>
+/* ── Console ────────────────────────────────────────────── */
 
-            <button
-              type="button"
-              aria-pressed={policySelected}
-              onClick={() => {
-                setPolicySelected((v) => !v);
-                invalidate();
-              }}
-              className={`dc-reset${policySelected ? "" : " dc-hover"}`}
-              style={{
-                border: RULE,
-                background: policySelected ? "#000000" : "#FAF9F6",
-                color: policySelected ? "#FAF9F6" : "#000000",
-                display: "flex",
-                flexDirection: "column",
-                cursor: "pointer",
-                minHeight: CARD_H,
-                // Short enough to feel immediate, long enough that the card
-                // does not snap. This is the most-clicked thing on the page.
-                transition: "background 0.18s ease, color 0.18s ease",
-              }}
-            >
-              <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: TIGHT, flex: 1 }}>
-                <div style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 22, lineHeight: 1.1 }}>
-                  Sanctions Screening
-                </div>
-                {/*
-                  Recipient, not "either party". The deployed policy screens the
-                  sender too and that is verified — but this page always sends
-                  the same clean sender, so nothing here exercises it.
-                */}
-                <div style={{ fontSize: 15, lineHeight: 1.45, color: policySelected ? "#FAF9F6" : "#171714" }}>
-                  Blocks a transaction if the recipient appears on a sanctions list.
-                </div>
-              </div>
+function Console(props: {
+  applied: boolean;
+  onApply: () => void;
+  to: string;
+  from: string;
+  focus: "to" | "from" | null;
+  setFocus: (v: "to" | "from" | null) => void;
+  onTo: (v: string) => void;
+  onFrom: (v: string) => void;
+  toPick: Pick;
+  fromPick: Pick;
+  onPickTo: (k: "clean" | "ofac") => void;
+  onPickFrom: (k: "clean" | "ofac") => void;
+  ready: boolean;
+  onVerify: () => void;
+  toValid: boolean;
+  fromValid: boolean;
+}) {
+  const {
+    applied,
+    onApply,
+    to,
+    from,
+    focus,
+    setFocus,
+    onTo,
+    onFrom,
+    toPick,
+    fromPick,
+    onPickTo,
+    onPickFrom,
+    ready,
+    onVerify,
+    toValid,
+    fromValid,
+  } = props;
 
-              <div
-                style={{
-                  background: policySelected ? "#FAF9F6" : "transparent",
-                  color: policySelected ? "#000000" : "#5C5C55",
-                  transition: "background 0.18s ease, color 0.18s ease",
-                  fontFamily: SANS,
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                  letterSpacing: "0.14em",
-                  textTransform: "uppercase",
-                  padding: "6px 20px",
-                }}
-              >
-                {policySelected ? "Applied" : "Select"}
-              </div>
-            </button>
-          </div>
+  /**
+   * Either party is enough; whatever is left blank gets a clean address. So
+   * the only things worth saying are "no policy" and "that is not an
+   * address" — nagging for a second address you have no opinion about is
+   * asking the visitor to do the demo's homework.
+   */
+  const hint = !applied
+    ? "No policy applied"
+    : (to && !toValid) || (from && !fromValid)
+      ? "Not a valid address"
+      : !toValid && !fromValid
+        ? "Fill either party"
+        : "";
 
-          {/* 02 — recipient */}
-          <div style={{ display: "flex", flexDirection: "column", gap: HEAD_GAP }}>
-            <StepHead n="02">Add a recipient</StepHead>
+  return (
+    <div
+      className="pe-rise"
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflow: "auto",
+        display: "flex",
+        alignItems: "center",
+        padding: "40px 46px",
+      }}
+    >
+      <div className="pe-console" style={{ width: "100%", maxWidth: 1180, margin: "0 auto" }}>
+        {/* 01 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: S2 }}>
+          {/* "Active policy", because it already is. A single compulsory
+              option presented as a choice is a speed bump, not a decision. */}
+          <Head n="01">Active policy</Head>
 
-            <input
-              value={to}
-              onChange={(e) => {
-                setTo(e.target.value.trim());
-                // Typed by hand, so neither shortcut is the source any more.
-                setPicked(null);
-                invalidate();
-              }}
-              spellCheck={false}
-              placeholder="0x…"
-              className="dc-input"
-              style={{
-                // The same box as a disclosure opposite: same height, same
-                // frame, same inset. Mono, because it holds an address —
-                // sized to sit optically level with the serif labels rather
-                // than to match their point size.
-                width: "100%",
-                height: FIELD_H,
-                border: RULE,
-                background: "transparent",
-                color: "#000000",
-                fontFamily: MONO,
-                fontSize: 14.5,
-                letterSpacing: "-0.015em",
-                padding: "0 16px",
-                outline: "none",
-              }}
-            />
-
-            {/* Declared heights, because the right column measures itself
-                against these rows. */}
-            {showInvalid && (
-              <div style={{ height: LINE_H, lineHeight: `${LINE_H}px`, fontSize: 12.5, color: "#8E2B1F" }}>
-                Not a valid 20-byte address.
-              </div>
-            )}
-
-            {/* Type sized to the 16px line box rather than the other way
-                round, so the row costs exactly LINE_H and COL_GAP stays
-                honest. */}
-            <div style={{ height: LINE_H, lineHeight: `${LINE_H}px`, fontSize: 12.5, color: "#5C5C55" }}>
-              Or try one of these:
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(2,minmax(0,1fr))",
-                gap: HEAD_GAP,
-                height: ROW_H,
-              }}
-            >
-              {/*
-                Active state tracks which button last filled the field, not
-                which address is in it — the addresses change every click, so
-                comparing against a constant would never match.
-              */}
-              <Shortcut
-                active={picked === "clean"}
-                label="Ordinary wallet"
-                onClick={() => {
-                  setTo(randomOrdinary());
-                  setPicked("clean");
-                  invalidate();
-                }}
-              />
-              <Shortcut
-                active={picked === "sanctioned"}
-                label="Sanctioned wallet"
-                onClick={() => {
-                  setTo(randomSanctioned(to));
-                  setPicked("sanctioned");
-                  invalidate();
-                }}
-              />
-            </div>
-          </div>
-
-          {/* The action. No step number: the other two are decisions, this is
-              what they lead to. */}
-          <div style={{ display: "flex", flexDirection: "column", gap: HEAD_GAP }}>
-            <button
-              type="button"
-              onClick={verify}
-              disabled={!ready}
-              className={`dc-reset dc-primary${!ready ? " dc-disabled" : run.status === "idle" ? " dc-ready" : ""}`}
-              style={{
-                height: ACTION_H,
-                background: "#000000",
-                color: "#FAF9F6",
-                cursor: "pointer",
-                fontFamily: SANS,
-                fontSize: 14,
-                fontWeight: 600,
-                letterSpacing: "0.05em",
-                textTransform: "uppercase",
-                // Centred by flex rather than by padding, so the declared
-                // height is the whole story.
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "0 24px",
-              }}
-            >
-              Verify policy onchain
-            </button>
-
-            {/* A greyed primary button with no explanation reads as broken
-                rather than waiting. */}
-            {!ready && !busy && (
-              <div style={{ height: LINE_H, lineHeight: `${LINE_H}px`, fontSize: 12.5, color: "#5C5C55" }}>
-                {!policySelected && !valid
-                  ? "Select a policy and enter an address."
-                  : !policySelected
-                    ? "Select a policy above."
-                    : "Enter an address to screen."}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── Right ──────────────────────────────────────────── */}
-        {/*
-          Two elements on purpose.
-
-          The outer one is the shutter: its width animates from 0 and it clips
-          whatever is inside. The inner one is a fixed 50vw at all times, so
-          the contents are laid out at their final size from the first frame
-          and the reveal uncovers finished text instead of reflowing it.
-
-          Putting that fixed width on the outer element — as I did first —
-          makes min-width beat width:0 and the panel never closes at all.
-        */}
-        <div
-          className="dc-rail"
-          aria-hidden={!split}
-          style={{
-            width: split ? "50%" : 0,
-            flexShrink: 0,
-            overflow: "hidden",
-            borderLeft: `${split ? BORDER : 0}px solid #000000`,
-            // Decelerating curve — fast off the mark, settling gently. A
-            // linear-feeling ease made the panel look dragged open.
-            transition:
-              "width 0.5s cubic-bezier(0.22, 1, 0.36, 1), border-left-width 0.5s cubic-bezier(0.22, 1, 0.36, 1)",
-            background: "#FAF9F6",
-          }}
-        >
-          <div
-            className={`dc-rail-inner dc-pad${split ? " dc-rail-in" : ""}`}
+          <button
+            type="button"
+            aria-pressed={applied}
+            onClick={onApply}
+            className="pe-reset"
             style={{
-              width: "50vw",
-              height: "100%",
-              padding: PAD,
+              background: FIELD,
+              border: `1px solid ${applied ? INK : "transparent"}`,
+              borderRadius: R_INSET,
+              padding: 26,
+              // Fills its column instead of floating at a fixed height, which
+              // left it stranded beside a much taller second step.
+              flex: 1,
+              minHeight: 260,
               display: "flex",
               flexDirection: "column",
-              gap: COL_GAP,
-              overflowY: "auto",
+              width: "100%",
+              transition: "border-color 0.18s ease",
             }}
           >
-          {/* An invisible copy of the step header opposite, so the two columns
-              align by construction rather than by a computed offset. */}
-          <div style={{ display: "flex", flexDirection: "column", gap: HEAD_GAP }}>
-            <div aria-hidden style={{ visibility: "hidden" }}>
-              <StepHead n="00">Spacer</StepHead>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 16, width: "100%" }}>
+              <span style={{ fontFamily: DISPLAY, fontSize: 32, lineHeight: 1.05, letterSpacing: "-0.01em" }}>
+                Sanctions Screening
+              </span>
+              <span
+                aria-hidden
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: 6,
+                  border: `1px solid ${applied ? INK : CONTROL}`,
+                  background: applied ? INK : SURFACE,
+                  color: "#fff",
+                  fontSize: 13,
+                  lineHeight: "20px",
+                  textAlign: "center",
+                  flexShrink: 0,
+                  transition: "background 0.18s ease, border-color 0.18s ease",
+                }}
+              >
+                {applied ? "✓" : ""}
+              </span>
             </div>
 
-            {run.status !== "result" ? (
-              <div
-                style={{
-                  border: RULE,
-                  background: "#FAF9F6",
-                  display: "flex",
-                  flexDirection: "column",
-                  minHeight: CARD_H,
-                }}
-              >
-                <div
-                  style={{
-                    padding: "16px 20px",
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "center",
-                    gap: TIGHT,
-                    flex: 1,
-                  }}
-                >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: TIGHT,
-                    fontFamily: SANS,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    letterSpacing: "0.14em",
-                    textTransform: "uppercase",
-                    color: "#5C5C55",
-                  }}
-                >
-                  {busy && (
-                    <span
-                      className="pulse"
-                      style={{ width: 8, height: 8, borderRadius: "50%", background: "#000000", display: "block" }}
-                    />
-                  )}
-                  {busy ? "Awaiting quorum" : "Pending decision"}
-                </div>
+            <div style={{ fontSize: 16, lineHeight: 1.5, color: BODY, marginTop: 14, maxWidth: "34ch" }}>
+              Blocks the transfer if either party appears on a sanctions list. Enforced by an operator
+              quorum before the transaction executes.
+            </div>
 
-                <div
-                  style={{
-                    fontFamily: DISPLAY,
-                    fontWeight: 300,
-                    fontSize: 34,
-                    lineHeight: 1.02,
-                    letterSpacing: "-0.02em",
-                    color: busy ? "#000000" : "#5C5C55",
-                  }}
-                >
-                  {busy ? "Screening" : "Not yet decided"}
-                </div>
+            <div style={{ marginTop: "auto", paddingTop: 22, ...label(10), color: applied ? INK : FLAG }}>
+              {applied ? "Applied · tap to remove" : "Removed · nothing will be enforced"}
+            </div>
+          </button>
+        </div>
 
-                {/* Indeterminate on purpose: there is no progress figure to
-                    report from a quorum, and a moving percentage would be
-                    invented information. */}
-                {busy && (
-                  <div style={{ height: 6, background: "rgba(0,0,0,0.12)", overflow: "hidden", marginTop: 2 }}>
-                    <div
-                      style={{
-                        height: "100%",
-                        width: "22%",
-                        background: "#000000",
-                        animation: "loadSlide 1.5s ease-in-out infinite",
-                      }}
-                    />
-                  </div>
-                )}
-                </div>
-
-                {/* Same foot the policy card has, in its unselected state. */}
-                <div
-                  style={{
-                    color: "#5C5C55",
-                    fontFamily: SANS,
-                    fontSize: 10.5,
-                    fontWeight: 700,
-                    letterSpacing: "0.14em",
-                    textTransform: "uppercase",
-                    padding: "6px 20px",
-                  }}
-                >
-                  {busy ? "Running" : "Idle"}
-                </div>
-              </div>
-            ) : (
-              <div
-                style={{
-                  position: "relative",
-                  overflow: "hidden",
-                  border: RULE,
-                  background: "#FAF9F6",
-                  display: "flex",
-                  flexDirection: "column",
-                  minHeight: CARD_H,
-                  // Faded, not removed: the verdict was real, it just no
-                  // longer describes what is in the form.
-                  opacity: run.stale ? 0.4 : 1,
-                  transition: "opacity 0.2s ease",
-                }}
-              >
-                {/*
-                  The colour fills the whole card and wipes in from the left,
-                  rather than sitting as a rule along the top. A verdict is not
-                  a label on a neutral card — it is the state of the card.
-
-                  Drawn as an absolute layer so it can animate independently of
-                  the contents, which sit above it.
-                */}
-                <div
-                  key={`${run.outcome.headline}-${run.outcome.tone}`}
-                  className="dc-rule"
-                  style={{ position: "absolute", inset: 0, background: fillColor(run.outcome.tone) }}
-                />
-
-                <div
-                  className="dc-verdict"
-                  style={{
-                    position: "relative",
-                    padding: "16px 20px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: TIGHT,
-                    flex: 1,
-                    color: "#171714",
-                  }}
-                >
-                {run.stale && <Eyebrow>Inputs changed · run again</Eyebrow>}
-
-                <div
-                  style={{
-                    fontFamily: DISPLAY,
-                    fontWeight: 700,
-                    fontSize: 38,
-                    lineHeight: 0.95,
-                    letterSpacing: "-0.03em",
-                    // Black on the pastel fill. The colour is already saying
-                    // which verdict this is; setting the headline in the same
-                    // hue made it fight its own background.
-                    color: "#000000",
-                  }}
-                >
-                  {run.outcome.headline}
-                </div>
-
-                {/* Prose only where it is the sole explanation. For a verdict
-                    the headline says it, and the deny chip says why. */}
-                {run.outcome.tone === "error" && (
-                  <div style={{ fontSize: 14.5, lineHeight: 1.45, maxWidth: "44ch" }}>
-                    {run.outcome.reason}
-                  </div>
-                )}
-
-                {run.outcome.denies.length > 0 && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: TIGHT }}>
-                    {run.outcome.denies.map((d, i) => (
-                      <span
-                        key={d}
-                        className="dc-chip"
-                        style={{
-                          fontFamily: MONO,
-                          fontSize: 11.5,
-                          // Drawn in the verdict's own darker hue. Cream had
-                          // enough contrast against a saturated fill; against
-                          // a pastel one it disappeared.
-                          border: `${BORDER}px solid ${inkColor(run.outcome.tone)}`,
-                          color: inkColor(run.outcome.tone),
-                          padding: "4px 8px",
-                          // Staggered after the headline so several reasons
-                          // arrive one at a time rather than as a block.
-                          animationDelay: `${0.34 + i * 0.05}s`,
-                        }}
-                      >
-                        {d}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                </div>
-
-                {/*
-                  A foot bar, matching the policy card opposite. Both cards now
-                  read the same way: content above, a black status strip along
-                  the bottom. Previously the left card had a foot and the right
-                  one did not, which is what made them look like two different
-                  components.
-                */}
-                <div
-                  style={{
-                    position: "relative",
-                    background: "#000000",
-                    color: "#FAF9F6",
-                    fontFamily: SANS,
-                    fontSize: 10.5,
-                    fontWeight: 700,
-                    letterSpacing: "0.14em",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {run.outcome.explorerUrl ? (
-                    <a
-                      href={run.outcome.explorerUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: TIGHT,
-                        padding: "6px 20px",
-                        color: "#FAF9F6",
-                      }}
-                    >
-                      <span>View attestation</span>
-                      <span aria-hidden>Newton Explorer ↗</span>
-                    </a>
-                  ) : (
-                    <div style={{ padding: "6px 20px" }}>Decided</div>
-                  )}
-                </div>
-              </div>
-            )}
+        {/* 02 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: S2 }}>
+          {/*
+            The hint keeps its line whether or not it has anything to say.
+            Removing the element when the form became valid moved every row
+            below it — the panel resized at the exact moment you were about to
+            aim at the button.
+          */}
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 20 }}>
+            <Head n="02">Add a transfer</Head>
+            <span style={{ fontSize: 14, color: MUTED, minHeight: 20 }}>{hint}</span>
           </div>
 
           {/*
-            The three disclosures, sitting on the left column's rows.
-
-            An invisible head puts the top of the stack level with the top of
-            the recipient field. The two margins below then place the second
-            box level with the wallet shortcuts and the third level with the
-            action button. Every number derives from the row heights declared
-            at the top of this file, so the columns cannot drift: change a
-            height and both sides move together.
-
-            A spacer rather than a label, because the boxes name themselves
-            and a heading would only be a fourth thing to align.
+            Each party owns its own shortcuts. One control that filled
+            "whichever side is selected" meant reading a mode indicator to
+            know where a click would land; two pairs means the button you
+            press is next to the box it fills, and any combination —
+            sanctioned sender with a clean recipient, both dirty, either
+            direction — is one click per side.
           */}
-          <div style={{ display: "flex", flexDirection: "column", gap: HEAD_GAP }}>
-            <div aria-hidden style={{ visibility: "hidden" }}>
-              <StepHead n="00">Spacer</StepHead>
-            </div>
+          <Field
+            name="Recipient"
+            raw={to}
+            focused={focus === "to"}
+            onFocus={() => setFocus("to")}
+            onBlur={() => setFocus(null)}
+            onChange={onTo}
+            onEnter={() => ready && onVerify()}
+            invalid={Boolean(to) && !toValid}
+          >
+            <Pickers picked={toPick} onPick={onPickTo} party="recipient" empty={!to} />
+          </Field>
 
-            {/* One gap, the same everywhere. Because COL_GAP is derived from
-                the helper-text row opposite, this lands each box on its
-                counterpart without a single hand-set offset. */}
-            <div style={{ display: "flex", flexDirection: "column", gap: COL_GAP }}>
-            <Expander label="Raw operator response" disabled={run.status !== "result"}>
-              <CodeBlock text={run.status === "result" ? asText(run.outcome.raw) : ""} wrap />
-            </Expander>
+          {/*
+            The sender is a field because the deployed policy screens it. It
+            was hardcoded and invisible for the whole life of this demo, which
+            left payer_sanctioned and payer_not_screened — half the policy —
+            unreachable from the interface.
+          */}
+          <Field
+            name="Sender"
+            raw={from}
+            focused={focus === "from"}
+            onFocus={() => setFocus("from")}
+            onBlur={() => setFocus(null)}
+            onChange={onFrom}
+            onEnter={() => ready && onVerify()}
+            invalid={Boolean(from) && !fromValid}
+          >
+            <Pickers picked={fromPick} onPick={onPickFrom} party="sender" empty={!from} />
+          </Field>
 
-            {/* Level with the wallet shortcuts. Drops by one row when the
-                invalid-address message pushes the left column down. */}
-            <Expander label="Policy source" offset={showInvalid ? INVALID_SHIFT : 0}>
-              <CodeBlock
-                text={
-                  deployed?.source ??
-                  (deployedError
-                    ? `Couldn't fetch the deployed policy.\n\n${deployedError}\n\n` +
-                      `This panel shows what the operators run, resolved from the chain.\n` +
-                      `It deliberately does not fall back to the Rego composed in this\n` +
-                      `page — that is a different document, and labelling one as the\n` +
-                      `other is how a display starts disagreeing with reality.`
-                    : "Resolving from chain…")
-                }
-                header={(
-                  [
-                    ["PolicyClient", process.env.NEXT_PUBLIC_POLICY_CLIENT ?? ""],
-                    ["Policy", deployed?.policyAddress ?? ""],
-                    ["Oracle", provider?.policyData ?? ""],
-                  ] as [string, string][]
-                ).map(([k, addr]) => (
-                  <div
-                    key={k}
-                    style={{ display: "flex", justifyContent: "space-between", gap: HEAD_GAP, padding: "3px 0" }}
-                  >
-                    <span style={{ fontFamily: MONO, fontSize: 11, color: "#5C5C55" }}>{k}</span>
-                    {/* Linked, because "deployed" is the strongest claim this
-                        page makes and was previously unverifiable text. */}
-                    {addr ? (
-                      <a
-                        href={`https://sepolia.etherscan.io/address/${addr}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ fontFamily: MONO, fontSize: 11, textDecoration: "underline", textUnderlineOffset: 3 }}
-                      >
-                        {shortAddr(addr)} ↗
-                      </a>
-                    ) : (
-                      <span style={{ fontFamily: MONO, fontSize: 11 }}>—</span>
-                    )}
-                  </div>
-                ))}
-              />
-            </Expander>
-
-            {/*
-              Every run against this PolicyClient, by anyone, read from
-              Sepolia. A clean result and a sanctioned one sitting together is
-              what shows the policy discriminates rather than blanket-denying.
-            */}
-            {/* Openable when there is an error too, or the failure would be
-                sealed inside a box that refuses to open. */}
-            <Expander label="Earlier runs" disabled={history.length === 0 && !historyError}>
-              <div style={{ padding: "2px 0" }}>
-                {historyError && (
-                  <div style={{ fontSize: 12, color: "#8E2B1F", padding: "6px 0" }}>
-                    Couldn&rsquo;t read the chain: {historyError}
-                  </div>
-                )}
-
-                {history.map((h) => (
-                  <div
-                    key={h.taskId}
-                    style={{ display: "flex", alignItems: "center", gap: TIGHT, padding: "7px 0" }}
-                  >
-                    <span
-                      style={{
-                        width: 8,
-                        height: 8,
-                        flexShrink: 0,
-                        // Hollow for pending: no fill, because no verdict.
-                        background:
-                          h.verdict === "allowed"
-                            ? "#3F6F55"
-                            : h.verdict === "denied"
-                              ? "#C2621A"
-                              : "transparent",
-                        border: h.verdict === "pending" ? "1px solid #5C5C55" : "none",
-                      }}
-                    />
-                    <span style={{ fontFamily: MONO, fontSize: 11.5, color: "#5C5C55" }}>
-                      {shortAddr(h.address)}
-                    </span>
-                    <span
-                      style={{
-                        marginLeft: "auto",
-                        fontFamily: SANS,
-                        fontSize: 10,
-                        fontWeight: 700,
-                        letterSpacing: "0.12em",
-                        textTransform: "uppercase",
-                        color:
-                          h.verdict === "allowed"
-                            ? "#2E5A44"
-                            : h.verdict === "denied"
-                              ? "#C2621A"
-                              : "#5C5C55",
-                      }}
-                    >
-                      {h.verdict === "allowed"
-                        ? "Compliant"
-                        : h.verdict === "denied"
-                          ? "Non Compliant"
-                          : "Awaiting response"}
-                    </span>
-                    <a
-                      href={`https://explorer.newton.xyz/testnet/task/${h.taskId}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      aria-label="View attestation"
-                      style={{ fontFamily: MONO, fontSize: 11, color: "#5C5C55" }}
-                    >
-                      ↗
-                    </a>
-                  </div>
-                ))}
-              </div>
-            </Expander>
-            </div>
-          </div>
-          </div>
+          {/*
+            Last element, so its bottom edge is the column's bottom edge —
+            level with the policy card opposite, which stretches to the same
+            height.
+          */}
+          <button
+            type="button"
+            onClick={onVerify}
+            disabled={!ready}
+            className={`pe-reset ${ready ? "pe-dark" : ""}`}
+            style={{
+              marginTop: "auto",
+              height: 76,
+              width: "100%",
+              borderRadius: R_PILL,
+              ...label(11),
+              fontSize: 12,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              // Outlined rather than a grey slab. A filled grey block at this
+              // size reads as a region, not as a control that is not ready.
+              background: ready ? undefined : "transparent",
+              border: ready ? "1px solid transparent" : `1px solid ${CONTROL}`,
+              color: ready ? undefined : MUTED_2,
+              cursor: ready ? "pointer" : "not-allowed",
+            }}
+          >
+            Check this transfer
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-/* ── Pieces ────────────────────────────────────────────────── */
-
-function StepHead({ n, children }: { n: string; children: React.ReactNode }) {
+function Head({ n, children }: { n: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", alignItems: "baseline", gap: HEAD_GAP }}>
-      <div style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 19, lineHeight: 1 }}>{n}</div>
-      <div style={{ fontFamily: SANS, fontSize: 12, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase" }}>
-        {children}
-      </div>
+    <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+      <span style={{ fontFamily: DISPLAY, fontSize: 22, color: MUTED_2, lineHeight: 1 }}>{n}</span>
+      <span style={{ ...label(11), color: INK }}>{children}</span>
     </div>
   );
 }
 
-function Eyebrow({ children }: { children: React.ReactNode }) {
+function Field(props: {
+  name: string;
+  raw: string;
+  focused: boolean;
+  onFocus: () => void;
+  onBlur: () => void;
+  onChange: (v: string) => void;
+  onEnter: () => void;
+  invalid: boolean;
+  hint?: string;
+  children?: React.ReactNode;
+}) {
+  const { name, raw, focused, onFocus, onBlur, onChange, onEnter, invalid, hint, children } = props;
+
   return (
-    <div style={{ fontFamily: SANS, fontSize: 11, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "#5C5C55" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: S1 }}>
+      {/*
+        A visible label, not just aria-label. Two identical grey boxes with
+        placeholders that vanish on the first keystroke are indistinguishable
+        the moment they are filled — which is exactly when knowing which is
+        which matters.
+      */}
+      <span style={{ ...label(10), color: MUTED }}>{name}</span>
+
+      <input
+        // Truncated at rest so a 42-character hash does not dominate the
+        // panel; whole on focus, because a partial address is not editable.
+        value={focused ? raw : raw ? middle(raw) : ""}
+        onChange={(e) => onChange(e.target.value.trim())}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onEnter();
+        }}
+        spellCheck={false}
+        placeholder="0x…"
+        aria-label={name}
+        aria-invalid={invalid}
+        className="pe-input"
+        style={{
+          width: "100%",
+          height: 72,
+          borderRadius: R_INSET,
+          border: `1px solid ${invalid ? ERROR : "transparent"}`,
+          background: FIELD,
+          padding: "0 22px",
+          fontFamily: MONO,
+          fontSize: 15,
+          color: INK,
+        }}
+      />
+      {invalid ? (
+        <span style={{ fontSize: 12.5, color: ERROR }}>Not a valid 20-byte address.</span>
+      ) : hint ? (
+        <span style={{ fontSize: 12.5, color: MUTED_2 }}>{hint}</span>
+      ) : null}
+
       {children}
     </div>
   );
 }
 
-/**
- * Selection changes the fill only. Varying border or padding made the button
- * resize on click, which reads as a layout glitch rather than a choice.
- */
-function Shortcut({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+function Pickers({
+  picked,
+  onPick,
+  party,
+  empty,
+}: {
+  picked: Pick;
+  onPick: (k: "clean" | "ofac") => void;
+  party: string;
+  /** Nothing typed yet, so these are the way in rather than a shortcut. */
+  empty: boolean;
+}) {
+  return (
+    <div style={{ display: "flex", gap: S1 }}>
+      {/*
+        Labels say what the button puts in the box, not what it is called.
+        "Random address" described the method; what someone needs to know is
+        which outcome they are setting up.
+      */}
+      <Picker
+        active={picked === "clean"}
+        empty={empty}
+        onClick={() => onPick("clean")}
+        title={`Fill the ${party} with a randomly generated address, which is not on any list`}
+      >
+        Clean address
+      </Picker>
+      <Picker
+        active={picked === "ofac"}
+        empty={empty}
+        onClick={() => onPick("ofac")}
+        title={`Fill the ${party} with a real OFAC-designated wallet from the live feed`}
+      >
+        Sanctioned address
+      </Picker>
+    </div>
+  );
+}
+
+function Picker({
+  active,
+  onClick,
+  title,
+  empty,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title?: string;
+  empty?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <button
       type="button"
       aria-pressed={active}
       onClick={onClick}
-      className={`dc-reset${active ? "" : " dc-hover"}`}
+      title={title}
+      className="pe-reset"
       style={{
-        height: ROW_H,
-        border: RULE,
-        background: active ? "#000000" : "transparent",
-        color: active ? "#FAF9F6" : "#000000",
-        padding: "0 16px",
-        cursor: "pointer",
+        flex: 1,
+        height: 48,
+        borderRadius: R_PILL,
+        // Outlined while the field is empty: with nothing typed these are the
+        // way in, not a shortcut past something.
+        border: `1px solid ${active ? INK : empty ? CONTROL : "transparent"}`,
+        background: active ? INK : FIELD,
+        color: active ? "#fff" : INK,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        gap: 10,
         fontSize: 14.5,
-        transition: "background 0.18s ease, color 0.18s ease",
+        transition: "background 0.18s ease, color 0.18s ease, border-color 0.18s ease",
       }}
     >
-      {label}
+      {children}
     </button>
   );
 }
 
+/* ── Screening ──────────────────────────────────────────── */
+
 /**
- * Scrollable code with a copy button in the corner.
+ * Three steps, because there are three: the gateway takes the task, the oracle
+ * performs ONE lookup against the consolidated collection, and a quorum signs.
  *
- * Short on purpose — these are references, not reading material, and a tall
- * block pushed the second expander off screen. Copy matters more than height:
- * the raw response is the thing you paste into an issue.
+ * An earlier design ticked OFAC, EU, UN and UK off in sequence. That is four
+ * animations for one query. The verdict can still report all four, because one
+ * result covers all four — but showing them being *checked* one at a time
+ * would be claiming work the backend never did.
+ *
+ * The bar is indeterminate on purpose: there is no percentage to read from a
+ * quorum, and a moving number would be invented.
  */
-function CodeBlock({
-  text,
-  wrap,
-  /**
-   * Rendered inside the frame, above the code.
-   *
-   * The PolicyClient and Oracle rows used to sit loose between the
-   * disclosure header and this box, belonging to neither. They are part of
-   * the same answer as the Rego — this is the policy, these are the
-   * addresses it is deployed at — so they live in the same box.
-   */
-  header,
+function Screening({ to, from, onCancel }: { to: string; from: string; onCancel: () => void }) {
+  return (
+    <div style={{ flex: 1, minHeight: 0, padding: "46px 52px", display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <span
+          className="pe-spin"
+          style={{
+            width: 16,
+            height: 16,
+            borderRadius: "50%",
+            border: `2px solid ${CONTROL}`,
+            borderTopColor: INK,
+            display: "block",
+          }}
+        />
+        <span style={{ ...label(11), color: INK }}>Verifying onchain</span>
+
+        {/* Eight seconds is long enough to notice a wrong address. */}
+        <button
+          type="button"
+          onClick={onCancel}
+          className="pe-reset"
+          style={{
+            marginLeft: "auto",
+            height: 36,
+            padding: "0 16px",
+            borderRadius: R_PILL,
+            border: `1px solid ${CONTROL}`,
+            ...label(9),
+            color: MUTED,
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+
+      <div
+        style={{
+          fontFamily: DISPLAY,
+          fontSize: "clamp(40px, 6vw, 72px)",
+          lineHeight: 1,
+          marginTop: 26,
+          letterSpacing: "-0.02em",
+        }}
+      >
+        Screening both parties
+      </div>
+
+      <div className="pe-sweep" style={{ marginTop: 22, borderRadius: R_INSET, maxWidth: 620 }}>
+        <div
+          style={{
+            background: FIELD,
+            padding: "16px 20px",
+            display: "grid",
+            gridTemplateColumns: "max-content minmax(0, 1fr)",
+            columnGap: 18,
+            rowGap: 8,
+            alignItems: "baseline",
+          }}
+        >
+          <span style={{ ...label(9), color: MUTED }}>Recipient</span>
+          <span style={{ fontFamily: MONO, fontSize: 13, color: BODY }}>{middle(to)}</span>
+          <span style={{ ...label(9), color: MUTED }}>Sender</span>
+          <span style={{ fontFamily: MONO, fontSize: 13, color: BODY }}>{middle(from)}</span>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 30, display: "flex", flexDirection: "column", gap: 13 }}>
+        <Step n={1}>Task submitted to the Newton gateway</Step>
+        <Step n={2}>
+          Both addresses screened against the consolidated list — OFAC, EU, UN and UK in one lookup
+        </Step>
+        <Step n={3}>Operator quorum evaluates the policy and signs the result</Step>
+      </div>
+
+      <div
+        style={{
+          marginTop: "auto",
+          height: 4,
+          borderRadius: R_PILL,
+          background: "rgba(27,27,27,0.1)",
+          overflow: "hidden",
+        }}
+      >
+        <div className="pe-sweep" style={{ height: "100%", width: "100%" }} />
+      </div>
+    </div>
+  );
+}
+
+function Step({ n, children }: { n: number; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", gap: 14, alignItems: "baseline" }}>
+      <span style={{ fontFamily: MONO, fontSize: 12, color: MUTED_2 }}>0{n}</span>
+      <span style={{ fontSize: 15, color: BODY, lineHeight: 1.45 }}>{children}</span>
+    </div>
+  );
+}
+
+/* ── Decision ───────────────────────────────────────────── */
+
+function Decision({
+  outcome,
+  to,
+  from,
+  prev,
+  stale,
 }: {
-  text: string;
-  wrap?: boolean;
-  header?: React.ReactNode;
+  outcome: Outcome;
+  to: string;
+  from: string;
+  prev: { verdict: Verdict; headline: string; to: string; from: string } | null;
+  stale: boolean;
 }) {
+  const p = outcome.parties;
+  const flagged: string[] = [];
+  if (p?.to?.sanctioned) flagged.push("recipient");
+  if (p?.from?.sanctioned) flagged.push("sender");
+
+  const allDatasets = [...(p?.to?.datasets ?? []), ...(p?.from?.datasets ?? []), ...outcome.datasets];
+  const regimes = [...new Set(allDatasets.map((d) => DATASET_REGIME[d]).filter(Boolean))];
+
+  /**
+   * Only claimed once attribution has come back. Before that the verdict is
+   * the verdict — a sentence naming a party we have not identified would be a
+   * guess dressed as a finding.
+   */
+  const who =
+    outcome.verdict !== "block"
+      ? null
+      : flagged.length === 2
+        ? "Both parties are designated."
+        : flagged.length === 1
+          ? `The ${flagged[0]} is designated.`
+          : null;
+
+  return (
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflow: "auto",
+        padding: "clamp(34px, 6vh, 76px) clamp(28px, 4vw, 64px)",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "center",
+      }}
+    >
+      {stale && <div style={{ ...label(10), color: BODY, marginBottom: 14 }}>Inputs changed · run again</div>}
+
+      <div
+        className="pe-reveal"
+        style={{
+          fontFamily: DISPLAY,
+          fontSize: "clamp(52px, 9vw, 104px)",
+          lineHeight: 0.94,
+          letterSpacing: "-0.025em",
+        }}
+      >
+        {outcome.headline}
+      </div>
+
+      <div style={{ fontSize: 18.5, lineHeight: 1.45, color: INK, marginTop: 18, maxWidth: "46ch" }}>
+        {who ? `${who} ${outcome.reason}` : outcome.reason}
+      </div>
+
+      {/*
+        The two sources disagreeing is itself the finding.
+
+        The verdict is signed by a quorum; the attribution below it is an
+        unsigned lookup done here, afterwards. If the operators denied and a
+        fresh lookup finds neither party listed, something moved between the
+        two — a delisting, a feed update, a divergent oracle — and the page
+        must say so rather than print "Non Compliant" above two parties both
+        marked Clear and let the reader reconcile it.
+      */}
+      {outcome.verdict === "block" && p?.to && p?.from && flagged.length === 0 && (
+        <div style={{ fontSize: 14.5, lineHeight: 1.5, marginTop: 14, maxWidth: "52ch", opacity: 0.75 }}>
+          The operators denied this transfer, but a lookup against the same list just now finds
+          neither party designated. The signed verdict stands — the difference is worth
+          investigating in the operator response.
+        </div>
+      )}
+
+      {/*
+        Only the regimes that actually matched.
+
+        This previously rendered all four with a per-list outcome, which on a
+        denial printed "OFAC no match · EU no match · UN no match · UK no
+        match" directly beneath the word "Non Compliant" — four statements
+        contradicting the headline above them, because the attestation carries
+        no dataset information and the code filled the gap with defaults.
+      */}
+      {outcome.verdict === "block" && regimes.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 9, marginTop: 22, alignItems: "center" }}>
+          <span style={{ ...label(9), color: "rgba(27,27,27,0.6)" }}>Listed on</span>
+          {regimes.map((r) => (
+            <span
+              key={r}
+              style={{
+                borderRadius: R_PILL,
+                border: `1px solid ${INK}`,
+                background: "rgba(27,27,27,0.08)",
+                padding: "7px 14px",
+                ...label(10),
+              }}
+            >
+              {r}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {outcome.verdict === "pass" && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 9, marginTop: 22, alignItems: "center" }}>
+          <span style={{ ...label(9), color: "rgba(27,27,27,0.6)" }}>No match on</span>
+          {REGIMES.map((r) => (
+            <span
+              key={r}
+              style={{
+                borderRadius: R_PILL,
+                border: "1px solid rgba(27,27,27,0.22)",
+                padding: "7px 14px",
+                ...label(10),
+                color: "rgba(27,27,27,0.7)",
+              }}
+            >
+              {r}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Rule names, when the policy returns them — the actual reason. */}
+      {outcome.denies.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
+          {outcome.denies.map((d) => (
+            <span
+              key={d}
+              style={{
+                fontFamily: MONO,
+                fontSize: 12,
+                border: `1px solid rgba(27,27,27,0.3)`,
+                borderRadius: R_PILL,
+                padding: "5px 12px",
+              }}
+            >
+              {d}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div style={{ height: 1, background: "rgba(27,27,27,0.16)", margin: "30px 0 22px", maxWidth: 1080 }} />
+
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 26, flexWrap: "wrap", maxWidth: 1080 }}>
+        <PartyBlock name="Recipient" address={to} party={p?.to} />
+        <PartyBlock name="Sender" address={from} party={p?.from} />
+
+        {/*
+          "Was this address clean" is not answerable; only "was it clean
+          then". A screenshot of this panel without a time is not evidence of
+          anything.
+        */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{ ...label(9), color: "rgba(27,27,27,0.62)" }}>Decided</span>
+          <span style={{ fontFamily: MONO, fontSize: 13 }}>{stamp(outcome.decidedAt)}</span>
+        </div>
+
+        {/*
+          The previous verdict, because the demonstration is the contrast. One
+          at a time, a policy that denies everything looks exactly like one
+          that works.
+        */}
+        {prev && prev.verdict !== outcome.verdict && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ ...label(9), color: "rgba(27,27,27,0.62)" }}>Previous</span>
+            <span style={{ fontSize: 13 }}>
+              {prev.headline} · {short(prev.to)}
+            </span>
+          </div>
+        )}
+
+        {/*
+          Absent when nothing was signed. A "view attestation" link on a run
+          that produced no attestation points at a claim that does not exist.
+        */}
+        {outcome.explorerUrl && (
+          <a
+            href={outcome.explorerUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="pe-dark"
+            style={{
+              marginLeft: "auto",
+              height: 52,
+              padding: "0 26px",
+              borderRadius: R_PILL,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              ...label(10),
+            }}
+          >
+            View attestation on the Newton explorer ↗
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PartyBlock({ name, address, party }: { name: string; address: string; party?: Party }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    } catch {
+      // Clipboard needs a secure context; failing silently beats an error the
+      // reader cannot act on.
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+        <span style={{ ...label(9), color: "rgba(27,27,27,0.62)" }}>{name}</span>
+        {party && (
+          <span
+            style={{
+              ...label(9),
+              color: party.sanctioned ? INK : "rgba(27,27,27,0.5)",
+              border: `1px solid ${party.sanctioned ? INK : "rgba(27,27,27,0.25)"}`,
+              borderRadius: R_PILL,
+              padding: "2px 8px",
+            }}
+          >
+            {party.sanctioned ? "Designated" : "Clear"}
+          </span>
+        )}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {/*
+          Whole, not truncated. Two different addresses can share a prefix and
+          a suffix, and this panel is the thing people screenshot as the
+          record — an abbreviation in a compliance artifact is a hazard, not a
+          tidiness.
+        */}
+        <span style={{ fontFamily: MONO, fontSize: 13, wordBreak: "break-all" }}>{address}</span>
+        <button
+          type="button"
+          onClick={copy}
+          className="pe-reset"
+          title={address}
+          style={{
+            borderRadius: R_PILL,
+            border: `1px solid rgba(27,27,27,0.3)`,
+            padding: "4px 10px",
+            ...label(9),
+          }}
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Evidence ───────────────────────────────────────────── */
+
+function EvidenceBar(props: {
+  open: "raw" | "policy" | "runs" | null;
+  setOpen: (v: "raw" | "policy" | "runs" | null) => void;
+  hasRun: boolean;
+  raw: string;
+  deployed: DeployedPolicy | null;
+  deployedError: string | null;
+  provider: { policyData?: string } | undefined;
+  history: SharedRun[];
+  historyError: string | null;
+  showReset: boolean;
+  onReset: () => void;
+}) {
+  const { open, setOpen, hasRun, raw, deployed, deployedError, provider, history, historyError, showReset, onReset } =
+    props;
+
+  const tab = (id: "raw" | "policy" | "runs", text: string, locked: boolean) => (
+    <button
+      type="button"
+      aria-expanded={open === id}
+      onClick={() => setOpen(open === id ? null : id)}
+      className="pe-reset"
+      style={{
+        height: 48,
+        padding: "0 20px",
+        borderRadius: R_PILL,
+        border: `1px solid ${open === id ? INK : "transparent"}`,
+        background: open === id ? INK : FIELD,
+        color: open === id ? "#fff" : locked ? MUTED : INK,
+        ...label(10),
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        transition: "background 0.18s ease, color 0.18s ease",
+      }}
+    >
+      {text}
+      {/* Locked tabs stay legible and say why, rather than ghosting out. */}
+      <span style={{ ...label(9), color: open === id ? "rgba(255,255,255,0.6)" : MUTED_2, fontWeight: 500 }}>
+        {locked ? "after a run" : open === id ? "−" : "+"}
+      </span>
+    </button>
+  );
+
+  return (
+    <div
+      style={{
+        flexShrink: 0,
+        background: SURFACE,
+        border: `1px solid ${HAIRLINE}`,
+        borderRadius: R_CARD,
+        padding: 14,
+      }}
+    >
+      {open && (
+        <div className="pe-rise" style={{ marginBottom: 14, maxHeight: 200, overflow: "auto" }}>
+          {open === "raw" && (
+            <Mono text={hasRun ? raw : "No run yet. The gateway's verbatim response appears here."} />
+          )}
+
+          {open === "policy" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <Rows
+                rows={[
+                  ["PolicyClient", process.env.NEXT_PUBLIC_POLICY_CLIENT ?? ""],
+                  ["Policy", deployed?.policyAddress ?? ""],
+                  ["Oracle", provider?.policyData ?? ""],
+                ]}
+              />
+              <Mono
+                text={
+                  deployed?.source ??
+                  (deployedError
+                    ? `Couldn't fetch the deployed policy.\n\n${deployedError}\n\n` +
+                      `This shows what the operators run, resolved from the chain. It does\n` +
+                      `not fall back to the Rego this project composes locally — that is a\n` +
+                      `different document, and the two have already drifted by two deny rules.`
+                    : "Resolving from chain…")
+                }
+              />
+            </div>
+          )}
+
+          {open === "runs" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {historyError && (
+                <div style={{ fontSize: 13, color: ERROR }}>Couldn&rsquo;t read the chain: {historyError}</div>
+              )}
+              {!historyError && history.length === 0 && (
+                <div style={{ fontSize: 13, color: MUTED }}>No runs on this client in the last ~3 hours.</div>
+              )}
+              {history.map((h) => (
+                <a
+                  key={h.taskId}
+                  href={`https://explorer.newton.xyz/testnet/task/${h.taskId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "10px 14px",
+                    borderRadius: R_INSET,
+                    background: FIELD,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: "50%",
+                      flexShrink: 0,
+                      background: h.verdict === "allowed" ? PASS : h.verdict === "denied" ? FLAG : "transparent",
+                      border: h.verdict === "pending" ? `1px solid ${MUTED_2}` : "none",
+                    }}
+                  />
+                  <span style={{ fontFamily: MONO, fontSize: 12.5, color: BODY }}>
+                    {h.sender ? `${short(h.sender)} → ${short(h.address)}` : short(h.address)}
+                  </span>
+                  <span
+                    style={{
+                      marginLeft: "auto",
+                      ...label(9),
+                      color: h.verdict === "allowed" ? PASS : h.verdict === "denied" ? FLAG : MUTED,
+                    }}
+                  >
+                    {h.verdict === "allowed" ? "Compliant" : h.verdict === "denied" ? "Non Compliant" : "Awaiting"}
+                  </span>
+                  <span style={{ fontFamily: MONO, fontSize: 12, color: MUTED_2 }}>↗</span>
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="pe-evidence" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {tab("raw", "Operator response", !hasRun)}
+        {tab("policy", "Deployed policy", false)}
+        {tab("runs", "Earlier runs", false)}
+
+        {showReset && (
+          <button
+            type="button"
+            onClick={onReset}
+            className="pe-reset pe-dark"
+            style={{
+              height: 48,
+              padding: "0 22px",
+              borderRadius: R_PILL,
+              ...label(10),
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            New check ↻
+          </button>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+function Rows({ rows }: { rows: [string, string][] }) {
+  return (
+    <div>
+      {rows.map(([k, addr]) => (
+        <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "5px 2px" }}>
+          <span style={{ fontFamily: MONO, fontSize: 11.5, color: MUTED }}>{k}</span>
+          {addr ? (
+            <a
+              href={`https://sepolia.etherscan.io/address/${addr}`}
+              target="_blank"
+              rel="noreferrer"
+              style={{ fontFamily: MONO, fontSize: 11.5, textDecoration: "underline", textUnderlineOffset: 3 }}
+            >
+              {short(addr)} ↗
+            </a>
+          ) : (
+            <span style={{ fontFamily: MONO, fontSize: 11.5, color: MUTED_2 }}>—</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Mono({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -1190,163 +1617,64 @@ function CodeBlock({
       setCopied(true);
       setTimeout(() => setCopied(false), 1400);
     } catch {
-      // Clipboard needs a secure context and permission; failing silently is
-      // better than an error the user cannot act on.
+      /* secure context only */
     }
   }
 
   return (
-    <div style={{ border: RULE, background: "#FFFFFF" }}>
-      {header && <div style={{ padding: "10px 12px 0" }}>{header}</div>}
-
-      {/* The copy button is positioned against the code, not the whole box,
-          so a header can use the full width without colliding with it. */}
-      <div style={{ position: "relative" }}>
-        <button
-          type="button"
-          onClick={copy}
-          disabled={!text}
-          className="dc-reset"
-          style={{
-            position: "absolute",
-            top: 6,
-            right: 6,
-            width: "auto",
-            zIndex: 1,
-            background: "#000000",
-            color: "#FAF9F6",
-            fontFamily: SANS,
-            fontSize: 9.5,
-            fontWeight: 700,
-            letterSpacing: "0.12em",
-            textTransform: "uppercase",
-            padding: "5px 9px",
-            cursor: "pointer",
-            opacity: text ? 1 : 0.3,
-          }}
-        >
-          {copied ? "Copied" : "Copy"}
-        </button>
-
-        <pre
-          style={{
-            margin: 0,
-            maxHeight: 132,
-            overflow: "auto",
-            padding: 12,
-            paddingTop: 28,
-            fontFamily: MONO,
-            fontSize: 11,
-            lineHeight: 1.55,
-            whiteSpace: wrap ? "pre-wrap" : "pre",
-          }}
-        >
-          {text}
-        </pre>
-      </div>
-    </div>
-  );
-}
-
-/**
- * A disclosure that opens smoothly.
- *
- * `<details>` snaps, and animating it needs a measured height. The grid
- * `0fr → 1fr` trick avoids the measurement entirely: the row collapses to
- * nothing and expands to exactly its content, with the browser interpolating
- * between, so the content can be any height without JavaScript knowing it.
- *
- * The header wears the wallet shortcut's clothes — same 2px frame, same fill
- * inversion, same padding and type size. It was a hairline rule with small
- * grey caps, which made three interactive controls look like column headings.
- */
-function Expander({
-  label,
-  children,
-  disabled,
-  /**
-   * Space above this box, in pixels. Set by the caller from the left
-   * column's row heights so each disclosure lands on the row opposite it —
-   * which is why the stack has no gap of its own.
-   */
-  offset = 0,
-}: {
-  label: string;
-  children: React.ReactNode;
-  disabled?: boolean;
-  offset?: number;
-}) {
-  const [open, setOpen] = useState(false);
-  // A disabled expander must not stay open from an earlier run.
-  const shown = open && !disabled;
-
-  return (
-    <div style={{ marginTop: offset, opacity: disabled ? 0.4 : 1, pointerEvents: disabled ? "none" : "auto" }}>
+    <div style={{ position: "relative" }}>
       <button
         type="button"
-        aria-expanded={shown}
-        onClick={() => setOpen((v) => !v)}
-        className={`dc-reset${shown ? "" : " dc-hover"}`}
+        onClick={copy}
+        className="pe-reset"
         style={{
-          height: ROW_H,
-          border: RULE,
-          background: shown ? "#000000" : "transparent",
-          color: shown ? "#FAF9F6" : "#000000",
-          padding: "0 16px",
-          cursor: "pointer",
-          fontSize: 14.5,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: TIGHT,
-          transition: "background 0.18s ease, color 0.18s ease",
+          position: "absolute",
+          top: 8,
+          right: 8,
+          borderRadius: R_PILL,
+          border: `1px solid ${CONTROL}`,
+          background: SURFACE,
+          padding: "5px 11px",
+          ...label(9),
+          color: MUTED,
         }}
       >
-        <span>{label}</span>
-        <span aria-hidden style={{ fontFamily: MONO }}>
-          {shown ? "−" : "+"}
-        </span>
+        {copied ? "Copied" : "Copy"}
       </button>
-
-      <div
+      <pre
         style={{
-          display: "grid",
-          gridTemplateRows: shown ? "1fr" : "0fr",
-          transition: "grid-template-rows 0.3s cubic-bezier(0.22, 1, 0.36, 1)",
+          margin: 0,
+          background: FIELD,
+          borderRadius: R_INSET,
+          padding: 16,
+          paddingTop: 34,
+          fontFamily: MONO,
+          fontSize: 11.5,
+          lineHeight: 1.6,
+          whiteSpace: "pre-wrap",
+          color: BODY,
         }}
       >
-        <div style={{ overflow: "hidden" }}>
-          <div style={{ paddingTop: shown ? 10 : 0, transition: "padding 0.3s" }}>{children}</div>
-        </div>
-      </div>
+        {text}
+      </pre>
     </div>
   );
 }
 
-/* ── Reading the operator response ─────────────────────────── */
+/* ── Reading the operator response ──────────────────────── */
 
 /**
  * The decision, from either RPC.
  *
- * The two methods answer in different shapes, and missing that is what made
- * the page disagree with the explorer:
- *
  *   newt_simulatePolicy → evaluation_result.result, a boolean.
  *   newt_createTask     → task_response.evaluation_result, a BYTES32 —
- *                         all-zero for false, ...0001 for true.
+ *                         all-zero for false, …0001 for true.
  *
- * Only the first was handled. Every submitted task therefore parsed as
- * "no verdict found", and the caller was rendering that as Compliant, so a
- * sanctioned address the operators had correctly denied appeared green here
- * while the explorer showed the real attestation.
- *
- * Returning undefined rather than false still matters — an unreadable
- * response is not a denial — but the caller must not treat undefined as
- * permission. See the call site.
+ * Only the first was handled once, so every submitted task parsed as "no
+ * verdict found" and the caller rendered that as Compliant. Undefined here
+ * must never reach a happy branch at the call site.
  */
 function extractAllow(result: any): boolean | undefined {
-  // createTask, quorum-signed. Checked first: it is the authoritative one,
-  // and it is what the explorer displays.
   const attested = result?.task_response?.evaluation_result ?? result?.evaluation_result;
   const decoded = decodeBytes32Bool(attested);
   if (decoded !== undefined) return decoded;
@@ -1361,11 +1689,9 @@ function extractAllow(result: any): boolean | undefined {
 }
 
 /**
- * A solidity bool as bytes32, in the encodings the gateway uses.
- *
  * Strict on purpose: anything that is not exactly zero or exactly one is
- * undefined, not "truthy". A loose test — "ends in 1" — would read 0x…21 as
- * allowed, and a wrong ALLOW is the one error this page must never make.
+ * undefined, not "truthy". A loose "ends in 1" test reads 0x…21 as allowed,
+ * and a wrong ALLOW is the one error this page must never make.
  */
 function decodeBytes32Bool(v: unknown): boolean | undefined {
   if (typeof v === "boolean") return v;
@@ -1386,10 +1712,6 @@ function decodeBytes32Bool(v: unknown): boolean | undefined {
   return undefined;
 }
 
-function extractReason(result: any): string | undefined {
-  return result?.evaluation_result?.reason ?? result?.result?.reason ?? result?.reason ?? undefined;
-}
-
 /** Named deny reasons, rendered only when the operator actually returns them. */
 function extractDenies(result: any): string[] {
   const candidates = [
@@ -1404,17 +1726,11 @@ function extractDenies(result: any): string[] {
   return [];
 }
 
-/**
- * Just the task id.
- *
- * Reference block, expiry block and quorum threshold were also here. They are
- * real, but four rows of them pushed the Policy source expander below the
- * fold, and anyone who wants those numbers can open the raw response — where
- * they were all along. The task id earns its place because it is the handle
- * for the explorer link beside it.
- */
-function extractEvidence(result: any): [string, string][] {
-  const taskId = result?.task_id ?? result?.taskId;
-  if (typeof taskId !== "string" || !taskId) return [];
-  return [["Task", `${taskId.slice(0, 10)}…${taskId.slice(-6)}`]];
+/** Raw dataset ids from a confirmed hit, if the response carries them. */
+function extractDatasets(result: any): string[] {
+  const seen: unknown[] = [result?.evaluation_result?.datasets, result?.result?.datasets, result?.datasets];
+  for (const c of seen) {
+    if (Array.isArray(c) && c.every((x) => typeof x === "string") && c.length) return c as string[];
+  }
+  return [];
 }

@@ -151,10 +151,18 @@ export async function GET() {
       mine.map(async (log) => {
         const task = (log.args as any).task;
         const taskId = task.taskId as string;
+        /**
+         * Both parties. The sender used to be a hidden constant, so recording
+         * only `intent.to` was harmless; now that it varies, a transfer denied
+         * for its SENDER would appear here as a clean-looking recipient marked
+         * Non Compliant — the feed misattributing the very thing it exists to
+         * record.
+         */
         const address = task.intent.to as string;
+        const sender = task.intent.from as string;
 
         if (denied.has(taskId)) {
-          return { taskId, address, verdict: "denied" as const, block: Number(log.blockNumber) };
+          return { taskId, address, sender, verdict: "denied" as const, block: Number(log.blockNumber) };
         }
 
         let responded = false;
@@ -173,6 +181,7 @@ export async function GET() {
         return {
           taskId,
           address,
+          sender,
           verdict: responded ? ("allowed" as const) : ("pending" as const),
           block: Number(log.blockNumber),
         };

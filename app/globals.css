@@ -1,38 +1,42 @@
 @import "tailwindcss";
 
 /*
- * Ported from the Policy Engine design file.
+ * Newton Policy Engine.
  *
- * The layout uses inline styles copied verbatim from that file so the spacing
- * and type scale match exactly. Only the things inline styles cannot express
- * — hover, focus, keyframes, selection — live here.
+ * The premise of the redesign: the deployed policy already decides correctly.
+ * What the interface has to do is make the decision legible — what was
+ * checked, against what, and what happens next.
  *
- * The design calls for GT Sectra, a licensed Grilli Type face. The .ttf files
- * were embedded in the design bundle but are not redistributable, and this
- * repo is public, so the stack falls back to Georgia. If you have a licence,
- * drop the files in app/fonts and add @font-face declarations here.
+ * Palette follows the DIA reference: greys, no pure black. Pure #000 on
+ * #F1F1F1 reads as a hole punched in the page; #1B1B1B on a soft gradient
+ * reads as ink.
  */
 
 :root {
   color-scheme: light;
 
-  /* Bone rather than the design's cream — the original read as yellow at
-     full-page scale, which is a different effect from a warm paper tint on a
-     small card. */
-  --page: #faf9f6;
-  --rail: #faf9f6;
-  --raised: #ffffff;
-  --ink: #000000;
-  --body: #171714;
-  --body-soft: #3a3a34;
-  --muted: #5c5c55;
-  --ok-rule: #3f6f55;
-  --ok-type: #2e5a44;
-  --block: #c2621a;
-  --invalid: #8e2b1f;
+  --ink: #1b1b1b;
+  --ink-2: #333333;
+  --field: #f1f1f1;
+  --surface: #ffffff;
+  --hairline: #e2e2e2;
+  --control: #bdbdbd;
+  --control-2: #cccccc;
+  --body: #4a4a4a;
+  --muted: #6b6b6b;
+  --muted-2: #a5a5a5;
 
-  --display: "GT Sectra Display", Georgia, "Times New Roman", serif;
-  --serif: "GT Sectra", Georgia, "Times New Roman", serif;
+  --pass: #3f6f55;
+  --flag: #c2621a;
+  --error: #8e2b1f;
+
+  /* Selection only. Deliberately absent from Applied and Verify: an accent
+     that appears on the primary action reads as decoration, and this one is
+     doing a job — showing what you have highlighted. */
+  --accent: #b8ff9d;
+
+  --display: var(--font-display), "Instrument Serif", Georgia, serif;
+  --prose: var(--font-prose), Newsreader, Georgia, serif;
   --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -41,56 +45,61 @@
   box-sizing: border-box;
 }
 
+html,
 body {
   margin: 0;
-  background: var(--page);
+  padding: 0;
+}
+
+body {
+  background: var(--field);
   color: var(--ink);
-  font-family: var(--serif);
+  font-family: var(--prose);
   -webkit-font-smoothing: antialiased;
 }
 
 a {
-  color: #000000;
+  color: inherit;
   text-decoration: none;
-}
-a:hover {
-  color: #3f6f55;
 }
 
 ::selection {
-  background: #000;
-  color: #faf9f6;
-}
-
-details summary::-webkit-details-marker {
-  display: none;
-}
-details summary {
-  list-style: none;
-}
-
-@keyframes pulseDot {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.25;
-  }
+  background: var(--accent);
+  color: var(--ink);
 }
 
 /*
- * The panel reveal.
+ * A console, not a document.
  *
- * The width animation uncovers the panel; the contents fade up slightly after
- * it, so the eye follows the opening rather than watching text stretch. The
- * delay is shorter than the width transition on purpose — waiting for the
- * panel to finish before showing anything felt sluggish.
+ * Fixed to the viewport so the decision panel and the console can trade the
+ * same frame without the page growing. Below 700px tall that stops being
+ * possible without clipping content, so it scrolls instead — clipping a
+ * verdict would be worse than scrolling to it.
  */
-@keyframes railFade {
+.pe-shell {
+  height: 100dvh;
+  min-height: 700px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-height: 700px) {
+  .pe-shell {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+}
+
+/* ── Motion ─────────────────────────────────────────────── */
+
+/* The panel arriving. Drops from the top rather than fading: a decision
+   should feel like it landed. */
+@keyframes peDrop {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(-14px);
   }
   to {
     opacity: 1;
@@ -98,40 +107,69 @@ details summary {
   }
 }
 
-.dc-rail-in > * {
-  animation: railFade 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.16s both;
+.pe-drop {
+  animation: peDrop 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .dc-rail-in > * {
-    animation: none;
-  }
-}
-
-/*
- * The verdict arriving, in sequence.
- *
- * The rule draws across first, then the headline, then the reasons. A card
- * that fades in as one block reads as content being swapped; drawing the rule
- * first makes it read as a decision being reached — and the rule is the thing
- * carrying the colour, so it is the right element to commit first.
- */
-@keyframes ruleDraw {
+/* The verdict headline uncovered by a clip travelling just behind the sweep,
+   so the words appear to be revealed rather than faded in. */
+@keyframes peReveal {
   from {
-    transform: scaleX(0);
+    clip-path: inset(0 100% 0 0);
   }
   to {
-    transform: scaleX(1);
+    clip-path: inset(0 0 0 0);
   }
 }
 
-/* Slightly longer than a rule would need: it is now a full card of colour
-   wiping across, and the same duration read as abrupt at that size. */
-.dc-rule {
-  animation-duration: 0.5s;
+.pe-reveal {
+  animation: peReveal 0.62s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
 }
 
-@keyframes verdictIn {
+/* A band of light crossing a dark fill or an address in flight. */
+@keyframes peSweep {
+  0% {
+    transform: translateX(-140%) skewX(-16deg);
+  }
+  70%,
+  100% {
+    transform: translateX(560%) skewX(-16deg);
+  }
+}
+
+.pe-sweep {
+  position: relative;
+  overflow: hidden;
+}
+
+.pe-sweep::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 22%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.16) 25%,
+    rgba(255, 255, 255, 0.6) 50%,
+    rgba(255, 255, 255, 0.16) 75%,
+    transparent
+  );
+  animation: peSweep 2.6s cubic-bezier(0.45, 0, 0.3, 1) infinite;
+  pointer-events: none;
+}
+
+@keyframes peSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pe-spin {
+  animation: peSpin 0.9s linear infinite;
+}
+
+@keyframes peRise {
   from {
     opacity: 0;
     transform: translateY(6px);
@@ -142,206 +180,120 @@ details summary {
   }
 }
 
-.dc-rule {
-  transform-origin: left center;
-  animation: ruleDraw 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+.pe-rise > * {
+  animation: peRise 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.dc-verdict > * {
-  animation: verdictIn 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: 0.2s;
-}
-
-/* Each reason lands just after the last rather than the set appearing at
-   once. */
-.dc-chip {
-  animation: verdictIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .dc-rule,
-  .dc-verdict > *,
-  .dc-chip {
-    animation: none;
-  }
-}
-
-@keyframes fadeUp {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
+@keyframes pePulse {
+  0%,
+  100% {
     opacity: 1;
-    transform: none;
+  }
+  50% {
+    opacity: 0.3;
   }
 }
 
-/* Hover and focus, which the design expresses as style-hover / style-focus. */
-.dc-hover:hover {
-  background: #f7f4ea;
+.pe-pulse {
+  animation: pePulse 1.8s ease-in-out infinite;
 }
 
-.dc-primary:hover {
-  background: #1d1d1a;
-}
+/* ── Controls ───────────────────────────────────────────── */
 
-/*
- * The primary action inverts, slowly, once its prerequisites are met.
- *
- * A ring pulse was too subtle to notice. This swaps the fill and the type
- * together so the button reads at both ends of the cycle. Animations outrank
- * inline styles in the cascade, which is what lets this override the button's
- * own background.
- */
-/* Indeterminate progress. We cannot know how far along a quorum is, so the
-   bar reports "working", not a fraction — a fake percentage would be a
-   guess dressed as information. */
-@keyframes loadSlide {
-  0% {
-    transform: translateX(-105%);
-  }
-  100% {
-    transform: translateX(420%);
-  }
-}
-
-/*
- * A band of light crosses the primary action once it becomes available.
- *
- * Replaces a black/white blink, which flashed hard enough to pull the eye off
- * whatever you were reading. The fill never changes here — only a highlight
- * moves across it — so the button stays legible throughout.
- *
- * Runs continuously with a pause between passes, so it stays a live signal
- * without strobing.
- */
-@keyframes readySweep {
-  /* The gap: the band sits off-canvas for the back half of the cycle, which
-     is what stops a continuous animation feeling frantic. */
-  0% {
-    transform: translateX(-190%) skewX(-18deg);
-  }
-  70%,
-  100% {
-    transform: translateX(700%) skewX(-18deg);
-  }
-}
-
-.dc-ready {
-  position: relative;
-  overflow: hidden;
-}
-
-.dc-ready::after {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 26%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.16) 25%,
-    rgba(255, 255, 255, 0.72) 50%,
-    rgba(255, 255, 255, 0.16) 75%,
-    transparent
-  );
-  animation: readySweep 4.2s cubic-bezier(0.45, 0, 0.3, 1) infinite;
-  pointer-events: none;
-}
-
-/* Anyone who has asked the OS for less motion should not get a moving
-   call-to-action. */
-@media (prefers-reduced-motion: reduce) {
-  .dc-ready::after,
-  .pulse {
-    animation: none;
-  }
-}
-
-.dc-input:focus {
-  background: #f7f4ea;
-}
-
-.dc-disabled {
-  opacity: 0.28;
-  pointer-events: none;
-}
-
-/* Buttons carrying design-file styling, stripped of the UA defaults. */
-.dc-reset {
+.pe-reset {
   appearance: none;
   border: none;
   background: none;
-  padding: 0;
   margin: 0;
   font: inherit;
   color: inherit;
   text-align: inherit;
-  width: 100%;
+  cursor: pointer;
 }
 
 /*
- * Visible focus. The design has none, but every control here is a <button>
- * and a keyboard user needs to see where they are. Offset inward so it does
- * not collide with the frames.
+ * Focus is neutral, never the accent. A green ring next to a green
+ * "Compliant" verdict is a second green thing meaning something unrelated.
  */
-.dc-reset:focus-visible {
-  outline: 2px solid #c2621a;
-  outline-offset: -4px;
+.pe-reset:focus-visible,
+.pe-input:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
 
-/*
- * Single column below 900px.
- *
- * The design assumes a wide viewport and the grid had no breakpoint, so on a
- * phone both columns were squeezed side by side. A shared demo link gets
- * opened on phones.
- */
+.pe-input {
+  outline: none;
+}
+
+.pe-hover:hover {
+  border-color: var(--ink);
+}
+
+.pe-dark {
+  background: linear-gradient(180deg, var(--ink-2), var(--ink));
+  color: #fff;
+}
+
+.pe-dark:hover {
+  background: linear-gradient(180deg, #3d3d3d, #232323);
+}
+
+.pe-disabled {
+  opacity: 0.36;
+  pointer-events: none;
+}
+
+/* ── Layout ─────────────────────────────────────────────── */
+
+/* `stretch` so the policy card matches the height of the step beside it —
+   the two are one row, not two floating panels. */
+.pe-console {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 22px; /* S3 */
+}
+
 @media (max-width: 900px) {
-  .dc-split {
-    flex-direction: column !important;
+  .pe-console {
+    grid-template-columns: minmax(0, 1fr);
   }
-  /* Stacked, so the rail is full width and only takes space once it has
-     content — matching the desktop behaviour of appearing on first run. */
-  .dc-rail[aria-hidden="true"] {
-    display: none !important;
+  .pe-pad {
+    padding: 20px !important;
   }
-  .dc-rail {
-    width: 100% !important;
-    border-left: none !important;
-    border-top: 2px solid #000000 !important;
+  .pe-mast {
+    padding: 14px 20px !important;
   }
-  /* The 50vw inner width only makes sense beside a second column. */
-  .dc-rail-inner {
-    width: 100% !important;
-  }
-  .dc-pad {
-    padding: 24px 22px 28px !important;
-  }
-  .dc-mast {
-    padding: 16px 22px !important;
+  .pe-evidence {
+    flex-wrap: wrap;
   }
 }
 
-/* Height is only fixed where there is room for two independent scrolls. */
-@media (max-width: 900px) {
-  .dc-page {
-    height: auto !important;
-    overflow: visible !important;
-  }
-  .dc-scroll {
-    overflow-y: visible !important;
-  }
-}
-
-/* Slim scrollbars so the two independently-scrolling columns stay quiet. */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(0, 0, 0, 0.16);
   border: 3px solid transparent;
   background-clip: content-box;
+  border-radius: 999px;
+}
+
+/*
+ * Everything above is decoration on top of a decision. Someone who has asked
+ * the OS for less motion still needs the decision.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .pe-drop,
+  .pe-reveal,
+  .pe-rise > *,
+  .pe-sweep::after,
+  .pe-spin,
+  .pe-pulse {
+    animation: none;
+  }
+  .pe-reveal {
+    clip-path: none;
+  }
 }
