@@ -75,9 +75,9 @@ export default function CaseStudy() {
         </section>
 
         <section style={{ marginBottom: 100 }}>
-          <SectionLabel>Live application</SectionLabel>
+          <SectionLabel>Live application captures</SectionLabel>
           <h2 style={{ fontFamily: "var(--display), Georgia, serif", fontSize: 54, lineHeight: 1, fontWeight: 400, margin: "16px 0 18px" }}>See the policy evaluate a transfer.</h2>
-          <p style={{ color: MUTED, fontSize: 16, lineHeight: 1.55, maxWidth: 700, marginBottom: 28 }}>The frames below embed the deployed Newton policy builder itself. Use the controls inside the frame to test a clean address and a real designated address.</p>
+          <p style={{ color: MUTED, fontSize: 16, lineHeight: 1.55, maxWidth: 700, marginBottom: 28 }}>The captures below use the deployed Newton policy builder itself, so the interface remains interactive. Use the controls inside the frame to test a clean address and a real designated address.</p>
           <div style={{ display: "grid", gap: 28 }}>
             <AppCapture label="01 / Policy applied and ready to screen" />
             <AppCapture label="02 / Same policy, different transaction inputs" />
@@ -102,6 +102,13 @@ export default function CaseStudy() {
           <h2 style={{ fontFamily: "var(--display), Georgia, serif", fontSize: 52, lineHeight: 1, fontWeight: 400, margin: "16px 0 20px" }}>Detection is the input. Authorization is the control.</h2>
           <p style={{ fontSize: 18, lineHeight: 1.65, color: "#444", margin: 0 }}>Newton does not need to replace the system that identifies risk. It provides the layer where an application turns that signal into a policy decision and ties the decision to authorization. The same pattern can be applied to rewards, token claims, grants, treasury transfers, and other smart-contract actions.</p>
         </section>
+
+        <footer style={{ marginTop: 100, paddingTop: 30, borderTop: `1px solid ${HAIRLINE}`, display: "grid", gap: 10 }}>
+          <SectionLabel>Sources</SectionLabel>
+          <a href="https://www.trmlabs.com/resources/blog/how-shelbit-became-a-usd-6-3-billion-settlement-layer-for-irans-illicit-economy" target="_blank" rel="noreferrer" style={{ fontFamily: MONO, fontSize: 11 }}>TRM Labs / Shelbit blockchain analysis ↗</a>
+          <a href="https://public-inspection.federalregister.gov/2026-16573.pdf" target="_blank" rel="noreferrer" style={{ fontFamily: MONO, fontSize: 11 }}>U.S. Federal Register / Shelbit designation ↗</a>
+          <a href="https://docs.newton.xyz/" target="_blank" rel="noreferrer" style={{ fontFamily: MONO, fontSize: 11 }}>Newton documentation ↗</a>
+        </footer>
       </div>
     </main>
   );
