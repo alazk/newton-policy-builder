@@ -30,6 +30,10 @@ export const runtime = "nodejs";
 const GET_POLICY_ADDRESS = parseAbiItem("function getPolicyAddress() view returns (address)");
 const GET_POLICY_CID = parseAbiItem("function getPolicyCid() view returns (string)");
 const GET_ENTRYPOINT = parseAbiItem("function getEntrypoint() view returns (string)");
+const GET_POLICY_ID = parseAbiItem("function getPolicyId() view returns (bytes32)");
+const GET_POLICY_CONFIG = parseAbiItem(
+  "function getPolicyConfig(bytes32 policyId) view returns ((bytes policyParams, uint32 expireAfter))",
+);
 
 /**
  * Tried in order. One gateway is a single point of failure for the one panel
@@ -106,7 +110,44 @@ export async function GET() {
       );
     }
 
-    return NextResponse.json({ ok: true, source, cid, entrypoint, policyAddress, via });
+    /**
+     * The policy's parameters, so `min_match_score` stops being invisible.
+     *
+     * The Rego reads `data.params.min_match_score` and falls back to 0 — and
+     * 0 means any confirmed hit denies. That is the dial where the actual
+     * compliance judgment lives, and the page had no way to say what it was
+     * set to. Best-effort: policyParams is opaque `bytes` on-chain, so this
+     * tries UTF-8 JSON (what the gateway sends) and reports nothing rather
+     * than guessing if that fails.
+     */
+    let params: Record<string, unknown> | null = null;
+    let expireAfter: number | null = null;
+    try {
+      const policyId = await client.readContract({
+        address: policyClient,
+        abi: [GET_POLICY_ID],
+        functionName: "getPolicyId",
+      });
+      const cfg: any = await client.readContract({
+        address: policyAddress,
+        abi: [GET_POLICY_CONFIG],
+        functionName: "getPolicyConfig",
+        args: [policyId],
+      });
+      expireAfter = Number(cfg?.expireAfter ?? cfg?.[1] ?? 0) || null;
+
+      const raw: string = cfg?.policyParams ?? cfg?.[0] ?? "0x";
+      if (raw && raw !== "0x") {
+        const text = Buffer.from(raw.slice(2), "hex").toString("utf8");
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed === "object") params = parsed;
+      }
+    } catch {
+      // Unreadable params are reported as unknown, not as absent.
+      params = null;
+    }
+
+    return NextResponse.json({ ok: true, source, cid, entrypoint, policyAddress, via, params, expireAfter });
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: err instanceof Error ? err.message : String(err) },

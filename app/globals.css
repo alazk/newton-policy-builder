@@ -30,14 +30,22 @@
   --flag: #c2621a;
   --error: #8e2b1f;
 
-  /* Selection only. Deliberately absent from Applied and Verify: an accent
-     that appears on the primary action reads as decoration, and this one is
-     doing a job — showing what you have highlighted. */
-  --accent: #b8ff9d;
+  /*
+   * Interaction is ink, not a hue.
+   *
+   * The sheets specify indigo for focus and selection, and it was tried — it
+   * fought the pastel verdict fills, which are the only colour on the page
+   * that carries meaning. On a greyscale field with two semantic colours
+   * already spoken for, a third accent is one voice too many. Ink does the
+   * same work and stays out of the way.
+   */
+  --accent: #1b1b1b;
+  --accent-hover: #333333;
+  --accent-tint: #ececec;
 
-  --display: var(--font-display), "Instrument Serif", Georgia, serif;
-  --prose: var(--font-prose), Newsreader, Georgia, serif;
-  --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --sans: var(--font-sans), -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --display: var(--sans);
+  --prose: var(--sans);
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -54,8 +62,11 @@ body {
 body {
   background: var(--field);
   color: var(--ink);
-  font-family: var(--prose);
+  font-family: var(--sans);
   -webkit-font-smoothing: antialiased;
+  /* The grotesque needs tighter tracking at display sizes than at 14px; set
+     per-element rather than globally. */
+  letter-spacing: -0.006em;
 }
 
 a {
@@ -64,7 +75,7 @@ a {
 }
 
 ::selection {
-  background: var(--accent);
+  background: var(--accent-tint);
   color: var(--ink);
 }
 
@@ -242,30 +253,54 @@ a {
 }
 
 /*
- * Focus is neutral, never the accent. A green ring next to a green
- * "Compliant" verdict is a second green thing meaning something unrelated.
+ * Focus: a 2px indigo ring, per the Inputs sheet.
+ *
+ * Neutral before, on the reasoning that a green ring beside a green verdict
+ * was a second green meaning something unrelated. The indigo removes the
+ * collision without giving up a visible focus state.
  */
 .pe-reset:focus-visible,
 .pe-input:focus-visible {
-  outline: 2px solid var(--ink);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* The sheet draws focus as a ring on the control itself, not an offset
+   outline, for fields specifically. */
+.pe-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-tint);
 }
 
 .pe-input {
   outline: none;
+  transition:
+    border-color 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
+.pe-input:hover:not(:focus) {
+  border-color: var(--muted-2, #a5a5a5);
 }
 
 .pe-hover:hover {
   border-color: var(--ink);
 }
 
+/* The primary action. Indigo, flat — the sheets use solid interactive fills,
+   not the gradient the previous black button carried. */
 .pe-dark {
-  background: linear-gradient(180deg, var(--ink-2), var(--ink));
+  background: var(--accent);
   color: #fff;
 }
 
 .pe-dark:hover {
-  background: linear-gradient(180deg, #3d3d3d, #232323);
+  background: var(--accent-hover);
+}
+
+.pe-dark:active {
+  background: var(--accent-hover);
+  transform: translateY(1px);
 }
 
 .pe-disabled {
@@ -281,7 +316,7 @@ a {
   display: grid;
   grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr);
   align-items: stretch;
-  gap: 22px; /* S3 */
+  gap: 24px; /* SP.x3 */
 }
 
 @media (max-width: 900px) {
@@ -289,13 +324,92 @@ a {
     grid-template-columns: minmax(0, 1fr);
   }
   .pe-pad {
-    padding: 20px !important;
+    padding: 24px 16px !important;
   }
   .pe-mast {
-    padding: 14px 20px !important;
+    padding: 16px !important;
   }
   .pe-evidence {
     flex-wrap: wrap;
+  }
+}
+
+/*
+ * Rows that share a line with the bottom-right corner boxes.
+ *
+ * 300px for the boxes plus a 24px gutter. Capped at 1080 so the measure does
+ * not run away on a very wide screen. Below 1100px the corner stops being a
+ * corner (see the query underneath) and the reserve is released.
+ */
+.pe-clear-corner {
+  max-width: min(1080px, calc(100% - 324px));
+}
+
+@media (max-width: 1100px) {
+  .pe-clear-corner {
+    max-width: 100%;
+  }
+
+  /*
+   * Not enough width to keep a 300px column out of the verdict's way, so the
+   * boxes rejoin the flow at the end of the panel instead of floating over
+   * it. This is the one place the panel is allowed to grow — and where it
+   * does, the shell's own scroll takes over rather than content being clipped.
+   */
+  .pe-corner {
+    position: static !important;
+    margin-top: 24px;
+  }
+}
+
+/*
+ * Phones.
+ *
+ * The shell is a fixed-height console, which is the right shape on a desktop
+ * and the wrong one at 390 × 844: two address fields, four radios, a 72px
+ * action and three evidence tabs do not fit in 844px minus browser chrome, and
+ * `overflow: hidden` would quietly clip the bottom of a compliance verdict.
+ * So below this width the page stops being a console and becomes a document.
+ */
+@media (max-width: 640px) {
+  .pe-shell {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  /* The stage owns its own scroll on desktop; on a phone that produces a
+     scroll area inside a scroll area, and neither reaches the end. */
+  .pe-stage,
+  .pe-stage > * {
+    overflow: visible !important;
+    min-height: 0 !important;
+  }
+
+  .pe-pad {
+    padding: 16px !important;
+  }
+
+  .pe-console {
+    gap: 16px;
+  }
+
+  /* Stack rather than squeeze: two 48px pills side by side at 390px leaves
+     each about 150px, which cuts "Sanctioned address" in half. */
+  .pe-radios {
+    flex-direction: column;
+    gap: 12px !important;
+  }
+
+  /* Verdict detail wraps to one column instead of three cramped ones. */
+  .pe-parties {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 16px !important;
+  }
+
+  .pe-evidence button {
+    flex: 1 1 auto;
   }
 }
 

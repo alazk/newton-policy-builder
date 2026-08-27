@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CHAIN_ID, DEMO_POLICY_CLIENT, ENTRYPOINT } from "@/lib/catalog";
+import { clientKey, rateLimit } from "@/lib/rate-limit";
 
 /**
  * Evaluates the generated policy against a live oracle on Ethereum Sepolia.
@@ -26,6 +27,22 @@ export const runtime = "nodejs";
 const GATEWAY = process.env.NEWTON_GATEWAY_URL ?? "https://gateway.testnet.newton.xyz/rpc";
 
 export async function POST(req: NextRequest) {
+  /**
+   * Throttle before anything else, including reading the body: the point is
+   * to spend as little as possible on a request we are going to refuse.
+   */
+  const limited = rateLimit(clientKey(req));
+  if (!limited.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `Too many checks. Try again in ${limited.retryAfter}s.`,
+        hint: "Each check submits a real task to Sepolia, so the demo limits how fast they can be run.",
+      },
+      { status: 429, headers: { "retry-after": String(limited.retryAfter) } },
+    );
+  }
+
   const apiKey = process.env.NEWTON_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ ok: false, error: missingKeyMessage() }, { status: 500 });

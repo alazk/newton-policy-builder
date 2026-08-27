@@ -34,51 +34,59 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GOALS, PROVIDERS, SANCTIONED_TEST_ADDRESS } from "@/lib/catalog";
 import { SANCTIONED_POOL } from "@/lib/sanctioned-pool";
+import { C, H, R, SP, T, BORDER } from "@/lib/ds";
 
 /* ── Tokens ─────────────────────────────────────────────── */
 
-const INK = "#1B1B1B";
-const FIELD = "#F1F1F1";
-const SURFACE = "#FFFFFF";
-const HAIRLINE = "#E2E2E2";
-const CONTROL = "#CCCCCC";
-const BODY = "#4A4A4A";
-const MUTED = "#6B6B6B";
-const MUTED_2 = "#A5A5A5";
-const PASS = "#3F6F55";
-const FLAG = "#C2621A";
-const ERROR = "#8E2B1F";
+const INK = C.ink;
+const FIELD = C.field;
+const SURFACE = C.surface;
+const HAIRLINE = C.hairline;
+const CONTROL = C.control;
+const BODY = C.body;
+const MUTED = C.muted;
+const MUTED_2 = C.muted2;
+const ACCENT = C.accent;
+const PASS = C.pass;
+const FLAG = C.flag;
+const ERROR = C.error;
 
-const DISPLAY = "var(--display)";
 const SANS = "var(--sans)";
 const MONO = "var(--mono)";
 
-const R_CARD = 22;
-const R_INSET = 16;
-const R_PILL = 999;
+const R_CARD = R.xl;
+const R_INSET = R.sm;
+const R_PILL = R.pill;
 
-const GAP = 12;
-const PAGE_PAD = 14;
+const GAP = SP.x1_5;
+const PAGE_PAD = SP.x2;
 
 /**
- * One spacing scale, both axes.
+ * Spacing, straight off the 8px grid.
  *
- * The gap between two buttons side by side and the gap between two stacked
- * rows were different numbers for no reason, which is what makes a grid look
- * hand-placed. S1 sits inside a control group, S2 between groups, S3 between
- * columns.
+ * S1 inside a control group, S2 between groups. These were 8 / 14 / 22 — two
+ * of them off the grid, which is why the columns needed hand-set offsets to
+ * line up at all. Call sites now use SP directly; these two remain because
+ * they name a role rather than a size.
  */
-const S1 = 8;
-const S2 = 14;
-const S3 = 22;
+const S1 = SP.x1;
+const S2 = SP.x2;
 
-const label = (size = 10): React.CSSProperties => ({
+/**
+ * The sheet's label: 14 / 20 at weight 500, sentence case.
+ *
+ * This replaces the 9–11px uppercase micro-labels the demo used everywhere.
+ * They came from a different reference and were the loudest thing on a page
+ * whose job is to state one quiet fact. Uppercase tracking survives only in
+ * the OFAC lockup, which is a mark rather than a label.
+ */
+const label = (): React.CSSProperties => ({
   fontFamily: SANS,
-  fontSize: size,
-  fontWeight: 600,
-  letterSpacing: "0.15em",
-  textTransform: "uppercase",
+  ...T.label,
 });
+
+/** Small print: helper text, secondary detail. */
+const small = (): React.CSSProperties => ({ fontFamily: SANS, ...T.valueSm });
 
 /* ── Addresses ──────────────────────────────────────────── */
 
@@ -171,6 +179,9 @@ type DeployedPolicy = {
   entrypoint: string;
   policyAddress: string;
   via: string;
+  /** null when the on-chain params could not be decoded — unknown, not absent. */
+  params: Record<string, unknown> | null;
+  expireAfter: number | null;
 };
 
 type ScreeningHealth = {
@@ -262,16 +273,28 @@ export default function Wizard() {
   const [deployed, setDeployed] = useState<DeployedPolicy | null>(null);
   const [deployedError, setDeployedError] = useState<string | null>(null);
   const [health, setHealth] = useState<ScreeningHealth | null>(null);
-  const [drawer, setDrawer] = useState<"raw" | "policy" | "runs" | null>(null);
+  /** Set when the throttle refuses a run; cleared on the next attempt. */
+  const [throttled, setThrottled] = useState<string | null>(null);
+
+  /**
+   * Back to a blank console.
+   *
+   * "New check" used to reset only the run, leaving both wallets in the
+   * boxes — so the next check started from someone else's addresses and the
+   * page looked like it had already decided something.
+   */
+  function reset() {
+    setRun({ status: "idle" });
+    setTo("");
+    setFrom("");
+    setToPick(null);
+    setFromPick(null);
+    setThrottled(null);
+    window.history.replaceState(null, "", window.location.pathname);
+  }
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-
-  /** The run before this one, for comparison. The whole demonstration is
-      that clean and sanctioned differ, and you could only see one at a time. */
-  const [prev, setPrev] = useState<{ verdict: Verdict; headline: string; to: string; from: string } | null>(
-    null,
-  );
 
   const toValid = isAddress(to);
   const fromValid = isAddress(from);
@@ -303,6 +326,16 @@ export default function Wizard() {
       setHistoryError(asText(e));
     }
   }, []);
+
+  /**
+   * Nothing restores the fields. They are empty on load, always.
+   *
+   * The page briefly wrote each run into the address bar and read it back on
+   * mount, which meant a reload arrived with wallets already in the boxes —
+   * the demo appearing to have an opinion before anyone gave it one. Both
+   * halves are gone; a stale `?to=&from=` left in someone's tab is ignored
+   * rather than honoured.
+   */
 
   useEffect(() => {
     loadHistory();
@@ -348,13 +381,9 @@ export default function Wizard() {
     if (sendTo !== to) setTo(sendTo);
     if (sendFrom !== from) setFrom(sendFrom);
 
-    // Only a real screening result is worth comparing against.
-    if (run.status === "done" && (run.outcome.verdict === "pass" || run.outcome.verdict === "block")) {
-      setPrev({ verdict: run.outcome.verdict, headline: run.outcome.headline, to, from });
-    }
-
     const ac = new AbortController();
     abortRef.current = ac;
+    setThrottled(null);
     setRun({ status: "running" });
 
     try {
@@ -373,6 +402,17 @@ export default function Wizard() {
       const json = await res.json();
 
       if (!res.ok || json.ok === false) {
+        /**
+         * A throttled request never reached the operators, so it is not a
+         * verdict of any kind — not even "no decision". Reported as the wait
+         * it is, with the inputs left intact so the button works again in a
+         * moment.
+         */
+        if (res.status === 429) {
+          setRun({ status: "idle" });
+          setThrottled(asText(json.error));
+          return;
+        }
         noDecision(asText(json.error) || "The request failed before a decision was reached.", json.raw);
         return;
       }
@@ -495,7 +535,7 @@ export default function Wizard() {
       className="pe-shell"
       style={{ background: FIELD, padding: PAGE_PAD, gap: GAP }}
     >
-      <Masthead health={health} />
+      <Masthead health={health} onHome={reset} />
 
       {/*
         Said out loud, not hidden in a title attribute — invisible on touch,
@@ -509,16 +549,16 @@ export default function Wizard() {
             flexShrink: 0,
             display: "flex",
             alignItems: "center",
-            gap: 10,
-            padding: "12px 20px",
+            gap: SP.x1,
+            padding: `${SP.x1_5}px ${SP.x2}px`,
             borderRadius: R_CARD,
-            border: `1px solid ${FLAG}`,
+            border: `${BORDER}px solid ${FLAG}`,
             background: "#FFF3E6",
             color: "#7A3D0E",
-            fontSize: 14,
+            ...T.valueSm,
           }}
         >
-          <span style={{ ...label(10), color: FLAG }}>
+          <span style={{ ...label(), color: FLAG }}>
             {health.ageHours === null ? "Data age unknown" : `Data ${Math.round(health.ageHours)}h old`}
           </span>
           <span>
@@ -536,6 +576,7 @@ export default function Wizard() {
       */}
       <div
         ref={stageRef}
+        className="pe-stage"
         tabIndex={-1}
         role={run.status === "idle" ? undefined : "status"}
         aria-live={run.status === "idle" ? undefined : "polite"}
@@ -545,7 +586,7 @@ export default function Wizard() {
           flex: 1,
           minHeight: 0,
           borderRadius: R_CARD,
-          border: `1px solid ${HAIRLINE}`,
+          border: `${BORDER}px solid ${HAIRLINE}`,
           background: SURFACE,
           overflow: "hidden",
           outline: "none",
@@ -594,6 +635,8 @@ export default function Wizard() {
             onVerify={verify}
             toValid={toValid}
             fromValid={fromValid}
+            throttled={throttled}
+            policyText={policyTextOf(deployed, deployedError, provider)}
           />
         )}
 
@@ -606,35 +649,26 @@ export default function Wizard() {
             outcome={done}
             to={to}
             from={from}
-            prev={prev}
             stale={run.status === "done" && Boolean(run.stale)}
+            onReset={reset}
+            /*
+             * Copy targets, not panels. The detail belongs to this decision,
+             * but nobody reads a Rego policy in a drawer on a demo screen —
+             * they take it somewhere with a scrollbar.
+             */
+            evidence={
+              <EvidenceRail raw={asText(done.raw)} history={history} historyError={historyError} />
+            }
           />
         )}
       </div>
-
-      <EvidenceBar
-        open={drawer}
-        setOpen={setDrawer}
-        hasRun={run.status === "done"}
-        raw={run.status === "done" ? asText(run.outcome.raw) : ""}
-        deployed={deployed}
-        deployedError={deployedError}
-        provider={provider}
-        history={history}
-        historyError={historyError}
-        showReset={run.status !== "idle"}
-        onReset={() => {
-          setRun({ status: "idle" });
-          setDrawer(null);
-        }}
-      />
     </div>
   );
 }
 
 /* ── Masthead ───────────────────────────────────────────── */
 
-function Masthead({ health }: { health: ScreeningHealth | null }) {
+function Masthead({ health, onHome }: { health: ScreeningHealth | null; onHome: () => void }) {
   const stale = health?.stale ?? false;
 
   return (
@@ -645,20 +679,43 @@ function Masthead({ health }: { health: ScreeningHealth | null }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        gap: 24,
-        padding: "14px 20px",
+        gap: SP.x3,
+        // Shorter. Two elements did not need 16px of vertical air on a
+        // fixed-height console — every pixel here is one the stage loses.
+        padding: `${SP.x1_5}px ${SP.x2}px`,
         background: SURFACE,
-        border: `1px solid ${HAIRLINE}`,
+        border: `${BORDER}px solid ${HAIRLINE}`,
         borderRadius: R_CARD,
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-        <img src="/newton-logo.svg" alt="Newton" style={{ height: 20, display: "block" }} />
-        <span
-          className="pe-dark"
-          style={{ ...label(10), borderRadius: R_PILL, padding: "8px 14px" }}
+        {/* The mark goes home, the way a masthead does everywhere else. */}
+        <button
+          type="button"
+          onClick={onHome}
+          className="pe-reset"
+          aria-label="Start a new check"
+          title="Start a new check"
+          style={{ display: "block", lineHeight: 0 }}
         >
-          AML / OFAC
+          <img src="/newton-logo.svg" alt="Newton" style={{ height: 18, display: "block" }} />
+        </button>
+        {/* The one place uppercase tracking survives: this is a lockup, not a
+            field label, and the sheet has no opinion on marks. */}
+        <span
+          style={{
+            background: INK,
+            color: SURFACE,
+            fontFamily: SANS,
+            ...T.monoSm,
+            fontWeight: 600,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            borderRadius: R_PILL,
+            padding: `${SP.x1}px ${SP.x2}px`,
+          }}
+        >
+          OFAC
         </span>
       </div>
 
@@ -679,7 +736,7 @@ function Masthead({ health }: { health: ScreeningHealth | null }) {
           display: "flex",
           alignItems: "center",
           gap: 9,
-          border: `1px solid ${stale ? FLAG : HAIRLINE}`,
+          border: `${BORDER}px solid ${stale ? FLAG : HAIRLINE}`,
           borderRadius: R_PILL,
           padding: "8px 16px",
           background: FIELD,
@@ -695,9 +752,9 @@ function Masthead({ health }: { health: ScreeningHealth | null }) {
             display: "block",
           }}
         />
-        <span style={{ ...label(10), color: INK }}>Sepolia</span>
+        <span style={{ ...label(), color: INK }}>Sepolia</span>
         {stale && (
-          <span style={{ ...label(10), color: FLAG }}>
+          <span style={{ ...label(), color: FLAG }}>
             · {health?.ageHours === null ? "Age unknown" : `${Math.round(health!.ageHours!)}h old`}
           </span>
         )}
@@ -725,6 +782,8 @@ function Console(props: {
   onVerify: () => void;
   toValid: boolean;
   fromValid: boolean;
+  throttled: string | null;
+  policyText: string;
 }) {
   const {
     applied,
@@ -743,6 +802,8 @@ function Console(props: {
     onVerify,
     toValid,
     fromValid,
+    throttled,
+    policyText,
   } = props;
 
   /**
@@ -751,13 +812,15 @@ function Console(props: {
    * address" — nagging for a second address you have no opinion about is
    * asking the visitor to do the demo's homework.
    */
-  const hint = !applied
-    ? "No policy applied"
-    : (to && !toValid) || (from && !fromValid)
-      ? "Not a valid address"
-      : !toValid && !fromValid
-        ? "Fill either party"
-        : "";
+  const hint = throttled
+    ? throttled
+    : !applied
+      ? "No policy applied"
+      : (to && !toValid) || (from && !fromValid)
+        ? "Not a valid address"
+        : !toValid && !fromValid
+          ? "Fill either party"
+          : "";
 
   return (
     <div
@@ -768,7 +831,7 @@ function Console(props: {
         overflow: "auto",
         display: "flex",
         alignItems: "center",
-        padding: "40px 46px",
+        padding: `${SP.x5}px ${SP.x6}px`,
       }}
     >
       <div className="pe-console" style={{ width: "100%", maxWidth: 1180, margin: "0 auto" }}>
@@ -776,7 +839,7 @@ function Console(props: {
         <div style={{ display: "flex", flexDirection: "column", gap: S2 }}>
           {/* "Active policy", because it already is. A single compulsory
               option presented as a choice is a speed bump, not a decision. */}
-          <Head n="01">Active policy</Head>
+          <Head>Active policy</Head>
 
           <button
             type="button"
@@ -785,13 +848,13 @@ function Console(props: {
             className="pe-reset"
             style={{
               background: FIELD,
-              border: `1px solid ${applied ? INK : "transparent"}`,
+              border: `${BORDER}px solid ${applied ? INK : "transparent"}`,
               borderRadius: R_INSET,
               padding: 26,
               // Fills its column instead of floating at a fixed height, which
               // left it stranded beside a much taller second step.
               flex: 1,
-              minHeight: 260,
+              minHeight: SP.x10 * 3.2, // 256, on the grid
               display: "flex",
               flexDirection: "column",
               width: "100%",
@@ -799,7 +862,7 @@ function Console(props: {
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", gap: 16, width: "100%" }}>
-              <span style={{ fontFamily: DISPLAY, fontSize: 32, lineHeight: 1.05, letterSpacing: "-0.01em" }}>
+              <span style={{ fontFamily: SANS, ...T.h3 }}>
                 Sanctions Screening
               </span>
               <span
@@ -808,10 +871,10 @@ function Console(props: {
                   width: 22,
                   height: 22,
                   borderRadius: 6,
-                  border: `1px solid ${applied ? INK : CONTROL}`,
+                  border: `${BORDER}px solid ${applied ? INK : CONTROL}`,
                   background: applied ? INK : SURFACE,
                   color: "#fff",
-                  fontSize: 13,
+                  ...T.valueSm,
                   lineHeight: "20px",
                   textAlign: "center",
                   flexShrink: 0,
@@ -822,15 +885,22 @@ function Console(props: {
               </span>
             </div>
 
-            <div style={{ fontSize: 16, lineHeight: 1.5, color: BODY, marginTop: 14, maxWidth: "34ch" }}>
+            <div style={{ ...T.value, fontFamily: SANS, color: BODY, marginTop: SP.x2, maxWidth: "34ch" }}>
               Blocks the transfer if either party appears on a sanctions list. Enforced by an operator
               quorum before the transaction executes.
             </div>
 
-            <div style={{ marginTop: "auto", paddingTop: 22, ...label(10), color: applied ? INK : FLAG }}>
+            <div style={{ marginTop: "auto", paddingTop: SP.x3, ...label(), color: applied ? INK : FLAG }}>
               {applied ? "Applied · tap to remove" : "Removed · nothing will be enforced"}
             </div>
           </button>
+
+          {/*
+            Readable before a run, not only after one.
+            The deployed policy was reachable only from the verdict, so anyone
+            who wanted to know what would be enforced had to enforce it first.
+          */}
+          <CopyBox label="Deployed policy" text={policyText} />
         </div>
 
         {/* 02 */}
@@ -842,8 +912,8 @@ function Console(props: {
             aim at the button.
           */}
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 20 }}>
-            <Head n="02">Add a transfer</Head>
-            <span style={{ fontSize: 14, color: MUTED, minHeight: 20 }}>{hint}</span>
+            <Head>Transfer</Head>
+            <span style={{ ...small(), color: MUTED, minHeight: 20 }}>{hint}</span>
           </div>
 
           {/*
@@ -898,18 +968,18 @@ function Console(props: {
             className={`pe-reset ${ready ? "pe-dark" : ""}`}
             style={{
               marginTop: "auto",
-              height: 76,
+              height: H.action,
               width: "100%",
               borderRadius: R_PILL,
-              ...label(11),
-              fontSize: 12,
+              ...T.label,
+              fontFamily: SANS,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               // Outlined rather than a grey slab. A filled grey block at this
               // size reads as a region, not as a control that is not ready.
               background: ready ? undefined : "transparent",
-              border: ready ? "1px solid transparent" : `1px solid ${CONTROL}`,
+              border: `${BORDER}px solid ${ready ? "transparent" : CONTROL}`,
               color: ready ? undefined : MUTED_2,
               cursor: ready ? "pointer" : "not-allowed",
             }}
@@ -922,13 +992,15 @@ function Console(props: {
   );
 }
 
-function Head({ n, children }: { n: string; children: React.ReactNode }) {
-  return (
-    <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
-      <span style={{ fontFamily: DISPLAY, fontSize: 22, color: MUTED_2, lineHeight: 1 }}>{n}</span>
-      <span style={{ ...label(11), color: INK }}>{children}</span>
-    </div>
-  );
+/**
+ * No numerals.
+ *
+ * "01" and "02" were left from a wizard that no longer exists: there are two
+ * panels side by side, not a sequence, and the first is applied by default.
+ * Numbering them implied an order nothing enforces.
+ */
+function Head({ children }: { children: React.ReactNode }) {
+  return <div style={{ ...label(), color: INK }}>{children}</div>;
 }
 
 function Field(props: {
@@ -953,7 +1025,7 @@ function Field(props: {
         the moment they are filled — which is exactly when knowing which is
         which matters.
       */}
-      <span style={{ ...label(10), color: MUTED }}>{name}</span>
+      <span style={{ ...label(), color: MUTED }}>{name}</span>
 
       <input
         // Truncated at rest so a 42-character hash does not dominate the
@@ -971,21 +1043,24 @@ function Field(props: {
         aria-invalid={invalid}
         className="pe-input"
         style={{
+          // Inputs sheet: white fill, 1px border, 8px radius. The demo drew
+          // these as borderless grey insets, which gave a field and a
+          // read-only panel the same treatment.
           width: "100%",
-          height: 72,
-          borderRadius: R_INSET,
-          border: `1px solid ${invalid ? ERROR : "transparent"}`,
-          background: FIELD,
-          padding: "0 22px",
+          height: H.field,
+          borderRadius: R.sm,
+          border: `${BORDER}px solid ${invalid ? ERROR : CONTROL}`,
+          background: SURFACE,
+          padding: `0 ${SP.x2}px`,
           fontFamily: MONO,
-          fontSize: 15,
+          fontSize: T.value.fontSize,
           color: INK,
         }}
       />
       {invalid ? (
-        <span style={{ fontSize: 12.5, color: ERROR }}>Not a valid 20-byte address.</span>
+        <span style={{ ...small(), color: ERROR }}>Not a valid 20-byte address.</span>
       ) : hint ? (
-        <span style={{ fontSize: 12.5, color: MUTED_2 }}>{hint}</span>
+        <span style={{ ...small(), color: MUTED_2 }}>{hint}</span>
       ) : null}
 
       {children}
@@ -1005,70 +1080,125 @@ function Pickers({
   /** Nothing typed yet, so these are the way in rather than a shortcut. */
   empty: boolean;
 }) {
+  /**
+   * A radio group, per the Radio sheet.
+   *
+   * These were pill buttons, which read as actions — press to do something.
+   * They are not: they are two mutually exclusive states of one field, which
+   * is exactly what a radio is for. The sheet's pattern also gives the pair a
+   * visible group label, so "which field does this fill" stops being a
+   * question.
+   *
+   * Arrow keys move between them and only the selected one is tabbable — the
+   * roving tabindex a radiogroup is expected to have.
+   */
+  const opts: { value: "clean" | "ofac"; text: string; hint: string }[] = [
+    {
+      value: "clean",
+      text: "Clean address",
+      hint: `A randomly generated address, which is on no list`,
+    },
+    {
+      value: "ofac",
+      text: "Sanctioned address",
+      hint: `A real OFAC-designated wallet from the live feed`,
+    },
+  ];
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    const i = opts.findIndex((o) => o.value === picked);
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      onPick(opts[(Math.max(i, 0) + 1) % opts.length].value);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      onPick(opts[(Math.max(i, 0) - 1 + opts.length) % opts.length].value);
+    }
+  }
+
   return (
-    <div style={{ display: "flex", gap: S1 }}>
-      {/*
-        Labels say what the button puts in the box, not what it is called.
-        "Random address" described the method; what someone needs to know is
-        which outcome they are setting up.
-      */}
-      <Picker
-        active={picked === "clean"}
-        empty={empty}
-        onClick={() => onPick("clean")}
-        title={`Fill the ${party} with a randomly generated address, which is not on any list`}
+    <div style={{ display: "flex", flexDirection: "column", gap: S1 }}>
+      <span style={{ ...small(), color: empty ? C.body : MUTED_2 }}>Fill the {party} with</span>
+      <div
+        role="radiogroup"
+        aria-label={`Fill the ${party} with`}
+        onKeyDown={onKeyDown}
+        className="pe-radios"
+        style={{ display: "flex", gap: SP.x3, flexWrap: "wrap" }}
       >
-        Clean address
-      </Picker>
-      <Picker
-        active={picked === "ofac"}
-        empty={empty}
-        onClick={() => onPick("ofac")}
-        title={`Fill the ${party} with a real OFAC-designated wallet from the live feed`}
-      >
-        Sanctioned address
-      </Picker>
+        {opts.map((o) => (
+          <Radio
+            key={o.value}
+            checked={picked === o.value}
+            onSelect={() => onPick(o.value)}
+            title={o.hint}
+          >
+            {o.text}
+          </Radio>
+        ))}
+      </div>
     </div>
   );
 }
 
-function Picker({
-  active,
-  onClick,
+/**
+ * Radio sheet: 24px hit target, 1px grey ring, indigo ring and fill when
+ * selected, label to the right at the sheet's 14/20.
+ */
+function Radio({
+  checked,
+  onSelect,
   title,
-  empty,
   children,
 }: {
-  active: boolean;
-  onClick: () => void;
+  checked: boolean;
+  onSelect: () => void;
   title?: string;
-  empty?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
-      aria-pressed={active}
-      onClick={onClick}
+      role="radio"
+      aria-checked={checked}
+      tabIndex={checked ? 0 : -1}
+      onClick={onSelect}
       title={title}
       className="pe-reset"
       style={{
-        flex: 1,
-        height: 48,
-        borderRadius: R_PILL,
-        // Outlined while the field is empty: with nothing typed these are the
-        // way in, not a shortcut past something.
-        border: `1px solid ${active ? INK : empty ? CONTROL : "transparent"}`,
-        background: active ? INK : FIELD,
-        color: active ? "#fff" : INK,
-        display: "flex",
+        display: "inline-flex",
         alignItems: "center",
-        justifyContent: "center",
-        gap: 10,
-        fontSize: 14.5,
-        transition: "background 0.18s ease, color 0.18s ease, border-color 0.18s ease",
+        gap: SP.x1_5,
+        minHeight: H.radio,
+        ...T.valueSm,
+        fontFamily: SANS,
+        color: INK,
       }}
     >
+      <span
+        aria-hidden
+        style={{
+          width: H.radio,
+          height: H.radio,
+          borderRadius: "50%",
+          border: `${checked ? 2 : BORDER}px solid ${checked ? ACCENT : CONTROL}`,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+          transition: "border-color 0.14s ease",
+        }}
+      >
+        <span
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: "50%",
+            background: checked ? ACCENT : "transparent",
+            transition: "background 0.14s ease",
+          }}
+        />
+      </span>
       {children}
     </button>
   );
@@ -1090,7 +1220,15 @@ function Picker({
  */
 function Screening({ to, from, onCancel }: { to: string; from: string; onCancel: () => void }) {
   return (
-    <div style={{ flex: 1, minHeight: 0, padding: "46px 52px", display: "flex", flexDirection: "column" }}>
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        padding: `${SP.x6}px ${SP.x6}px`,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <span
           className="pe-spin"
@@ -1103,7 +1241,7 @@ function Screening({ to, from, onCancel }: { to: string; from: string; onCancel:
             display: "block",
           }}
         />
-        <span style={{ ...label(11), color: INK }}>Verifying onchain</span>
+        <span style={{ ...label(), color: INK }}>Verifying onchain</span>
 
         {/* Eight seconds is long enough to notice a wrong address. */}
         <button
@@ -1112,11 +1250,11 @@ function Screening({ to, from, onCancel }: { to: string; from: string; onCancel:
           className="pe-reset"
           style={{
             marginLeft: "auto",
-            height: 36,
-            padding: "0 16px",
+            height: SP.x5,
+            padding: `0 ${SP.x2}px`,
             borderRadius: R_PILL,
-            border: `1px solid ${CONTROL}`,
-            ...label(9),
+            border: `${BORDER}px solid ${CONTROL}`,
+            ...small(),
             color: MUTED,
           }}
         >
@@ -1126,21 +1264,22 @@ function Screening({ to, from, onCancel }: { to: string; from: string; onCancel:
 
       <div
         style={{
-          fontFamily: DISPLAY,
-          fontSize: "clamp(40px, 6vw, 72px)",
+          fontFamily: SANS,
+          fontWeight: T.h2.fontWeight,
+          letterSpacing: T.h2.letterSpacing,
+          fontSize: "clamp(32px, 4.5vw, 48px)",
           lineHeight: 1,
-          marginTop: 26,
-          letterSpacing: "-0.02em",
+          marginTop: SP.x3,
         }}
       >
         Screening both parties
       </div>
 
-      <div className="pe-sweep" style={{ marginTop: 22, borderRadius: R_INSET, maxWidth: 620 }}>
+      <div className="pe-sweep" style={{ marginTop: SP.x3, borderRadius: R_INSET, maxWidth: 620 }}>
         <div
           style={{
             background: FIELD,
-            padding: "16px 20px",
+            padding: `${SP.x2}px ${SP.x2}px`,
             display: "grid",
             gridTemplateColumns: "max-content minmax(0, 1fr)",
             columnGap: 18,
@@ -1148,15 +1287,23 @@ function Screening({ to, from, onCancel }: { to: string; from: string; onCancel:
             alignItems: "baseline",
           }}
         >
-          <span style={{ ...label(9), color: MUTED }}>Recipient</span>
-          <span style={{ fontFamily: MONO, fontSize: 13, color: BODY }}>{middle(to)}</span>
-          <span style={{ ...label(9), color: MUTED }}>Sender</span>
-          <span style={{ fontFamily: MONO, fontSize: 13, color: BODY }}>{middle(from)}</span>
+          <span style={{ ...small(), color: MUTED }}>Recipient</span>
+          <span style={{ fontFamily: MONO, ...T.mono, color: BODY }}>{middle(to)}</span>
+          <span style={{ ...small(), color: MUTED }}>Sender</span>
+          <span style={{ fontFamily: MONO, ...T.mono, color: BODY }}>{middle(from)}</span>
         </div>
       </div>
 
-      <div style={{ marginTop: 30, display: "flex", flexDirection: "column", gap: 13 }}>
-        <Step n={1}>Task submitted to the Newton gateway</Step>
+      <div style={{ marginTop: SP.x4, display: "flex", flexDirection: "column", gap: SP.x1_5 }}>
+        {/*
+          Only the first step can be marked done, and only because we did it.
+          The gateway returns once, at the end — there is no progress to read
+          from a quorum mid-flight — so ticking 02 and 03 on a timer would be
+          inventing status.
+        */}
+        <Step n={1} done>
+          Task submitted to the Newton gateway
+        </Step>
         <Step n={2}>
           Both addresses screened against the consolidated list — OFAC, EU, UN and UK in one lookup
         </Step>
@@ -1178,11 +1325,13 @@ function Screening({ to, from, onCancel }: { to: string; from: string; onCancel:
   );
 }
 
-function Step({ n, children }: { n: number; children: React.ReactNode }) {
+function Step({ n, children, done }: { n: number; children: React.ReactNode; done?: boolean }) {
   return (
-    <div style={{ display: "flex", gap: 14, alignItems: "baseline" }}>
-      <span style={{ fontFamily: MONO, fontSize: 12, color: MUTED_2 }}>0{n}</span>
-      <span style={{ fontSize: 15, color: BODY, lineHeight: 1.45 }}>{children}</span>
+    <div style={{ display: "flex", gap: SP.x2, alignItems: "baseline" }}>
+      <span style={{ fontFamily: MONO, ...T.monoSm, color: done ? INK : MUTED_2, width: 16 }}>
+        {done ? "✓" : `0${n}`}
+      </span>
+      <span style={{ ...T.value, fontFamily: SANS, color: done ? INK : BODY }}>{children}</span>
     </div>
   );
 }
@@ -1193,14 +1342,16 @@ function Decision({
   outcome,
   to,
   from,
-  prev,
   stale,
+  onReset,
+  evidence,
 }: {
   outcome: Outcome;
   to: string;
   from: string;
-  prev: { verdict: Verdict; headline: string; to: string; from: string } | null;
   stale: boolean;
+  onReset: () => void;
+  evidence: React.ReactNode;
 }) {
   /**
    * The fill is its own layer so it can be clipped in independently of the
@@ -1243,27 +1394,77 @@ function Decision({
         style={{ position: "absolute", inset: 0, backgroundImage: FILL[outcome.verdict] }}
       />
 
+      {/*
+        The verdict does not scroll.
+        A decision you have to scroll to finish reading is not a decision you
+        can take in at a glance, and this panel has exactly one job. Padding
+        drops on shorter viewports (clamp on vh) so the content fits rather
+        than overflowing — the sizes give way, not the reader.
+      */}
       <div
         style={{
           position: "relative",
           flex: 1,
           minHeight: 0,
-          overflow: "auto",
-          padding: "clamp(34px, 6vh, 76px) clamp(28px, 4vw, 64px)",
+          overflow: "hidden",
+          padding: "clamp(20px, 4vh, 56px) clamp(24px, 4vw, 56px)",
           display: "flex",
           flexDirection: "column",
           justifyContent: "center",
         }}
       >
-        {stale && <div style={{ ...label(10), color: BODY, marginBottom: 14 }}>Inputs changed · run again</div>}
+        {/*
+          New check sits top-right of the outcome, directly under the network
+          badge — the same corner the page already uses for "state of the
+          system" rather than buried in a strip at the bottom.
+        */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: SP.x3,
+            marginBottom: SP.x3,
+          }}
+        >
+          <div style={{ ...small(), color: BODY, minHeight: 20 }}>
+            {stale ? "Inputs changed · run again" : ""}
+          </div>
+
+          {/* The way out, and nothing else. The evidence has its own corner. */}
+          <div style={{ flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={onReset}
+              className="pe-reset"
+              style={{
+                height: H.control,
+                padding: `0 ${SP.x3}px`,
+                borderRadius: R_PILL,
+                border: `${BORDER}px solid ${INK}`,
+                background: "transparent",
+                color: INK,
+                ...T.label,
+                fontFamily: SANS,
+                display: "flex",
+                alignItems: "center",
+              }}
+            >
+              New check
+            </button>
+          </div>
+        </div>
 
         <div
           className="pe-reveal"
           style={{
-            fontFamily: DISPLAY,
-            fontSize: "clamp(52px, 9vw, 104px)",
-            lineHeight: 0.94,
-            letterSpacing: "-0.025em",
+            fontFamily: SANS,
+            fontWeight: T.h1.fontWeight,
+            // Sized against height as well as width: the panel no longer
+            // scrolls, so on a short window the headline has to yield.
+            fontSize: "clamp(36px, min(7vw, 9vh), 76px)",
+            lineHeight: 1,
+            letterSpacing: T.h1.letterSpacing,
           }}
         >
           {outcome.headline}
@@ -1271,7 +1472,7 @@ function Decision({
 
         {/* Reason, lists, parties — arriving in the order you would say them. */}
         <div className="pe-seq" style={{ display: "contents" }}>
-        <div style={{ fontSize: 18.5, lineHeight: 1.45, color: INK, marginTop: 18, maxWidth: "46ch" }}>
+        <div style={{ ...T.valueLg, fontFamily: SANS, color: INK, marginTop: SP.x2, maxWidth: "46ch" }}>
           {who ? `${who} ${outcome.reason}` : outcome.reason}
         </div>
 
@@ -1291,7 +1492,7 @@ function Decision({
         looks like a fault.
       */}
       {outcome.verdict === "unavailable" && (
-        <div style={{ fontSize: 14.5, lineHeight: 1.5, marginTop: 16, maxWidth: "54ch", opacity: 0.8 }}>
+        <div style={{ ...small(), marginTop: SP.x2, maxWidth: "54ch", opacity: 0.8 }}>
           This is the policy behaving correctly. A screening service that cannot answer is treated
           the same as one that is down — the transfer is refused rather than allowed on stale
           information.
@@ -1299,7 +1500,7 @@ function Decision({
       )}
 
       {outcome.verdict === "block" && p?.to && p?.from && flagged.length === 0 && (
-        <div style={{ fontSize: 14.5, lineHeight: 1.5, marginTop: 14, maxWidth: "52ch", opacity: 0.75 }}>
+        <div style={{ ...small(), marginTop: SP.x2, maxWidth: "52ch", opacity: 0.75 }}>
           The operators denied this transfer, but a lookup against the same list just now finds
           neither party designated. The signed verdict stands — the difference is worth
           investigating in the operator response.
@@ -1316,17 +1517,17 @@ function Decision({
         no dataset information and the code filled the gap with defaults.
       */}
       {outcome.verdict === "block" && regimes.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 9, marginTop: 22, alignItems: "center" }}>
-          <span style={{ ...label(9), color: "rgba(27,27,27,0.6)" }}>Listed on</span>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: SP.x1, marginTop: SP.x3, alignItems: "center" }}>
+          <span style={{ ...small(), color: "rgba(27,27,27,0.6)" }}>Listed on</span>
           {regimes.map((r) => (
             <span
               key={r}
               style={{
                 borderRadius: R_PILL,
-                border: `1px solid ${INK}`,
+                border: `${BORDER}px solid ${INK}`,
                 background: "rgba(27,27,27,0.08)",
-                padding: "7px 14px",
-                ...label(10),
+                padding: `${SP.x1}px ${SP.x2}px`,
+                ...label(),
               }}
             >
               {r}
@@ -1336,16 +1537,16 @@ function Decision({
       )}
 
       {outcome.verdict === "pass" && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 9, marginTop: 22, alignItems: "center" }}>
-          <span style={{ ...label(9), color: "rgba(27,27,27,0.6)" }}>No match on</span>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: SP.x1, marginTop: SP.x3, alignItems: "center" }}>
+          <span style={{ ...small(), color: "rgba(27,27,27,0.6)" }}>No match on</span>
           {REGIMES.map((r) => (
             <span
               key={r}
               style={{
                 borderRadius: R_PILL,
-                border: "1px solid rgba(27,27,27,0.22)",
-                padding: "7px 14px",
-                ...label(10),
+                border: `${BORDER}px solid rgba(27,27,27,0.22)`,
+                padding: `${SP.x1}px ${SP.x2}px`,
+                ...label(),
                 color: "rgba(27,27,27,0.7)",
               }}
             >
@@ -1357,16 +1558,16 @@ function Decision({
 
       {/* Rule names, when the policy returns them — the actual reason. */}
       {outcome.denies.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: SP.x1, marginTop: SP.x2 }}>
           {outcome.denies.map((d) => (
             <span
               key={d}
               style={{
                 fontFamily: MONO,
-                fontSize: 12,
-                border: `1px solid rgba(27,27,27,0.3)`,
+                ...T.monoSm,
+                border: `${BORDER}px solid rgba(27,27,27,0.3)`,
                 borderRadius: R_PILL,
-                padding: "5px 12px",
+                padding: `${SP.half}px ${SP.x1_5}px`,
               }}
             >
               {d}
@@ -1375,9 +1576,53 @@ function Decision({
         </div>
       )}
 
-      <div style={{ height: 1, background: "rgba(27,27,27,0.16)", margin: "30px 0 22px", maxWidth: 1080 }} />
+          </div>
 
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 26, flexWrap: "wrap", maxWidth: 1080 }}>
+      {/*
+        The attestation link rides the divider.
+
+        It was down among the parties, competing with three blocks of address
+        detail for the same eye. On the rule it separates the finding above
+        from the evidence below — which is exactly what following the link
+        does.
+      */}
+      <div
+        className="pe-clear-corner"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: SP.x3,
+          margin: `${SP.x4}px 0 ${SP.x3}px`,
+        }}
+      >
+        <div style={{ flex: 1, height: 1, background: "rgba(27,27,27,0.16)" }} />
+
+        {outcome.explorerUrl && (
+          <a
+            href={outcome.explorerUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="pe-dark"
+            style={{
+              flexShrink: 0,
+              height: H.control,
+              padding: `0 ${SP.x3}px`,
+              borderRadius: R_PILL,
+              display: "flex",
+              alignItems: "center",
+              gap: SP.x1,
+              ...label(),
+            }}
+          >
+            View attestation on the Newton explorer ↗
+          </a>
+        )}
+      </div>
+
+      <div
+        className="pe-parties pe-clear-corner"
+        style={{ display: "flex", alignItems: "flex-end", gap: SP.x3, flexWrap: "wrap" }}
+      >
         {/* No Designated/Clear tag when nothing was screened — an unscreened
             address is not a clear one. */}
         <PartyBlock name="Recipient" address={to} party={outcome.verdict === "unavailable" ? undefined : p?.to} />
@@ -1388,50 +1633,38 @@ function Decision({
           then". A screenshot of this panel without a time is not evidence of
           anything.
         */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <span style={{ ...label(9), color: "rgba(27,27,27,0.62)" }}>Decided</span>
-          <span style={{ fontFamily: MONO, fontSize: 13 }}>{stamp(outcome.decidedAt)}</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: SP.half }}>
+          <span style={{ ...small(), color: "rgba(27,27,27,0.62)" }}>Decided</span>
+          {/* Sans, not mono. A timestamp is not a hash, and setting it like
+              one made it compete with the addresses beside it. */}
+          <span style={{ ...small() }}>{stamp(outcome.decidedAt)}</span>
         </div>
 
         {/*
-          The previous verdict, because the demonstration is the contrast. One
-          at a time, a policy that denies everything looks exactly like one
-          that works.
+          "Previous" lived here. Earlier runs already carries the contrast,
+          with more of it — and this block only appeared when two verdicts
+          disagreed, so the bottom row changed shape depending on history.
         */}
-        {prev && prev.verdict !== outcome.verdict && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={{ ...label(9), color: "rgba(27,27,27,0.62)" }}>Previous</span>
-            <span style={{ fontSize: 13 }}>
-              {prev.headline} · {short(prev.to)}
-            </span>
-          </div>
-        )}
+        </div>
 
         {/*
-          Absent when nothing was signed. A "view attestation" link on a run
-          that produced no attestation points at a claim that does not exist.
+          Bottom right, and out of flow.
+
+          Absolute means it cannot push the verdict around no matter what it
+          contains — which is what lets the panel stay unscrollable. The
+          content column reserves room for it (paddingRight below) so the
+          parties never run underneath.
         */}
-        {outcome.explorerUrl && (
-          <a
-            href={outcome.explorerUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="pe-dark"
-            style={{
-              marginLeft: "auto",
-              height: 52,
-              padding: "0 26px",
-              borderRadius: R_PILL,
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              ...label(10),
-            }}
-          >
-            View attestation on the Newton explorer ↗
-          </a>
-        )}
-        </div>
+        <div
+          className="pe-corner"
+          style={{
+            position: "absolute",
+            right: "clamp(24px, 4vw, 56px)",
+            bottom: "clamp(20px, 4vh, 56px)",
+            zIndex: 1,
+          }}
+        >
+          {evidence}
         </div>
       </div>
     </>
@@ -1453,31 +1686,31 @@ function PartyBlock({ name, address, party }: { name: string; address: string; p
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: SP.half }}>
       <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-        <span style={{ ...label(9), color: "rgba(27,27,27,0.62)" }}>{name}</span>
+        <span style={{ ...small(), color: "rgba(27,27,27,0.62)" }}>{name}</span>
         {party && (
           <span
             style={{
-              ...label(9),
+              ...small(),
               color: party.sanctioned ? INK : "rgba(27,27,27,0.5)",
-              border: `1px solid ${party.sanctioned ? INK : "rgba(27,27,27,0.25)"}`,
+              border: `${BORDER}px solid ${party.sanctioned ? INK : "rgba(27,27,27,0.25)"}`,
               borderRadius: R_PILL,
-              padding: "2px 8px",
+              padding: `${SP.half}px ${SP.x1}px`,
             }}
           >
             {party.sanctioned ? "Designated" : "Clear"}
           </span>
         )}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: SP.x1 }}>
         {/*
           Whole, not truncated. Two different addresses can share a prefix and
           a suffix, and this panel is the thing people screenshot as the
           record — an abbreviation in a compliance artifact is a hazard, not a
           tidiness.
         */}
-        <span style={{ fontFamily: MONO, fontSize: 13, wordBreak: "break-all" }}>{address}</span>
+        <span style={{ fontFamily: MONO, ...T.mono, wordBreak: "break-all" }}>{address}</span>
         <button
           type="button"
           onClick={copy}
@@ -1485,9 +1718,9 @@ function PartyBlock({ name, address, party }: { name: string; address: string; p
           title={address}
           style={{
             borderRadius: R_PILL,
-            border: `1px solid rgba(27,27,27,0.3)`,
-            padding: "4px 10px",
-            ...label(9),
+            border: `${BORDER}px solid rgba(27,27,27,0.3)`,
+            padding: `${SP.half}px ${SP.x1}px`,
+            ...small(),
           }}
         >
           {copied ? "Copied" : "Copy"}
@@ -1499,196 +1732,211 @@ function PartyBlock({ name, address, party }: { name: string; address: string; p
 
 /* ── Evidence ───────────────────────────────────────────── */
 
-function EvidenceBar(props: {
-  open: "raw" | "policy" | "runs" | null;
-  setOpen: (v: "raw" | "policy" | "runs" | null) => void;
-  hasRun: boolean;
+/**
+ * What gets copied under "Deployed policy": the addresses that identify it,
+ * the CID it was fetched from, the one parameter that is a judgment rather
+ * than plumbing, and then the Rego. Pasted anywhere, it still says what it is.
+ */
+function policyTextOf(
+  deployed: DeployedPolicy | null,
+  deployedError: string | null,
+  provider: { policyData?: string } | undefined,
+): string {
+  if (!deployed?.source) {
+    return deployedError
+      ? `Couldn't fetch the deployed policy.\n\n${deployedError}`
+      : "Resolving from chain…";
+  }
+
+  return [
+    `# PolicyClient  ${process.env.NEXT_PUBLIC_POLICY_CLIENT ?? "—"}`,
+    `# Policy        ${deployed.policyAddress}`,
+    `# Oracle        ${provider?.policyData ?? "—"}`,
+    `# CID           ${deployed.cid}`,
+    `# min_match_score ${
+      deployed.params && typeof deployed.params.min_match_score === "number"
+        ? deployed.params.min_match_score
+        : "not set — defaults to 0, so any confirmed match denies"
+    }`,
+    "",
+    deployed.source,
+  ].join("\n");
+}
+
+/**
+ * Three things worth taking away, and a button that takes each.
+ *
+ * This has been a bottom strip, a panel at the foot, a side column and a
+ * floating drawer. Every one of them rearranged the verdict in order to
+ * describe it, and none of them was what the detail is actually for: nobody
+ * reads a Rego policy or a gateway JSON blob in a 200px window on a demo
+ * screen. They copy it and read it somewhere that has a scrollbar and a
+ * search box.
+ *
+ * So there is nothing to expand. Three small boxes, each naming what it holds
+ * and handing it over.
+ */
+function EvidenceRail(props: {
   raw: string;
-  deployed: DeployedPolicy | null;
-  deployedError: string | null;
-  provider: { policyData?: string } | undefined;
   history: SharedRun[];
   historyError: string | null;
-  showReset: boolean;
-  onReset: () => void;
 }) {
-  const { open, setOpen, hasRun, raw, deployed, deployedError, provider, history, historyError, showReset, onReset } =
-    props;
-
-  const tab = (id: "raw" | "policy" | "runs", text: string, locked: boolean) => (
-    <button
-      type="button"
-      aria-expanded={open === id}
-      onClick={() => setOpen(open === id ? null : id)}
-      className="pe-reset"
-      style={{
-        height: 48,
-        padding: "0 20px",
-        borderRadius: R_PILL,
-        border: `1px solid ${open === id ? INK : "transparent"}`,
-        background: open === id ? INK : FIELD,
-        color: open === id ? "#fff" : locked ? MUTED : INK,
-        ...label(10),
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        transition: "background 0.18s ease, color 0.18s ease",
-      }}
-    >
-      {text}
-      {/* Locked tabs stay legible and say why, rather than ghosting out. */}
-      <span style={{ ...label(9), color: open === id ? "rgba(255,255,255,0.6)" : MUTED_2, fontWeight: 500 }}>
-        {locked ? "after a run" : open === id ? "−" : "+"}
-      </span>
-    </button>
-  );
+  const { raw, history, historyError } = props;
 
   return (
-    <div
-      style={{
-        flexShrink: 0,
-        background: SURFACE,
-        border: `1px solid ${HAIRLINE}`,
-        borderRadius: R_CARD,
-        padding: 14,
-      }}
-    >
-      {open && (
-        <div className="pe-rise" style={{ marginBottom: 14, maxHeight: 200, overflow: "auto" }}>
-          {open === "raw" && (
-            <Mono text={hasRun ? raw : "No run yet. The gateway's verbatim response appears here."} />
-          )}
+    <div style={{ display: "flex", flexDirection: "column", gap: SP.x1, width: 300 }}>
+      {/*
+        Two things, and they behave differently on purpose.
 
-          {open === "policy" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <Rows
-                rows={[
-                  ["PolicyClient", process.env.NEXT_PUBLIC_POLICY_CLIENT ?? ""],
-                  ["Policy", deployed?.policyAddress ?? ""],
-                  ["Oracle", provider?.policyData ?? ""],
-                ]}
-              />
-              <Mono
-                text={
-                  deployed?.source ??
-                  (deployedError
-                    ? `Couldn't fetch the deployed policy.\n\n${deployedError}\n\n` +
-                      `This shows what the operators run, resolved from the chain. It does\n` +
-                      `not fall back to the Rego this project composes locally — that is a\n` +
-                      `different document, and the two have already drifted by two deny rules.`
-                    : "Resolving from chain…")
-                }
-              />
-            </div>
-          )}
+        The gateway response is a JSON blob — unreadable in a 300px box, so it
+        is a copy target. A handful of runs is readable: verdict, address,
+        link. So that one opens.
 
-          {open === "runs" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              {historyError && (
-                <div style={{ fontSize: 13, color: ERROR }}>Couldn&rsquo;t read the chain: {historyError}</div>
-              )}
-              {!historyError && history.length === 0 && (
-                <div style={{ fontSize: 13, color: MUTED }}>No runs on this client in the last ~3 hours.</div>
-              )}
-              {history.map((h) => (
-                <a
-                  key={h.taskId}
-                  href={`https://explorer.newton.xyz/testnet/task/${h.taskId}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: "10px 14px",
-                    borderRadius: R_INSET,
-                    background: FIELD,
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 7,
-                      height: 7,
-                      borderRadius: "50%",
-                      flexShrink: 0,
-                      background: h.verdict === "allowed" ? PASS : h.verdict === "denied" ? FLAG : "transparent",
-                      border: h.verdict === "pending" ? `1px solid ${MUTED_2}` : "none",
-                    }}
-                  />
-                  <span style={{ fontFamily: MONO, fontSize: 12.5, color: BODY }}>
-                    {h.sender ? `${short(h.sender)} → ${short(h.address)}` : short(h.address)}
-                  </span>
-                  <span
-                    style={{
-                      marginLeft: "auto",
-                      ...label(9),
-                      color: h.verdict === "allowed" ? PASS : h.verdict === "denied" ? FLAG : MUTED,
-                    }}
-                  >
-                    {h.verdict === "allowed" ? "Compliant" : h.verdict === "denied" ? "Non Compliant" : "Awaiting"}
-                  </span>
-                  <span style={{ fontFamily: MONO, fontSize: 12, color: MUTED_2 }}>↗</span>
-                </a>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="pe-evidence" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        {tab("raw", "Operator response", !hasRun)}
-        {tab("policy", "Deployed policy", false)}
-        {tab("runs", "Earlier runs", false)}
-
-        {showReset && (
-          <button
-            type="button"
-            onClick={onReset}
-            className="pe-reset pe-dark"
-            style={{
-              height: 48,
-              padding: "0 22px",
-              borderRadius: R_PILL,
-              ...label(10),
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            New check ↻
-          </button>
-        )}
-
-      </div>
+        Deployed policy is neither; it lives in the console, where it can be
+        read before a decision rather than after one, and it does not change
+        between runs.
+      */}
+      <CopyBox label="Operator response" text={raw} />
+      <RunsBox history={history} historyError={historyError} />
     </div>
   );
 }
 
-function Rows({ rows }: { rows: [string, string][] }) {
+function RunsBox({ history, historyError }: { history: SharedRun[]; historyError: string | null }) {
+  const [open, setOpen] = useState(false);
+
   return (
-    <div>
-      {rows.map(([k, addr]) => (
-        <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "5px 2px" }}>
-          <span style={{ fontFamily: MONO, fontSize: 11.5, color: MUTED }}>{k}</span>
-          {addr ? (
+    <div style={{ position: "relative", width: "100%" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: SP.x1,
+          padding: `${SP.x1_5}px ${SP.x2}px`,
+          borderRadius: R_INSET,
+          border: `${BORDER}px solid ${open ? INK : "rgba(27,27,27,0.22)"}`,
+          background: "rgba(255,255,255,0.4)",
+          transition: "border-color 0.18s ease",
+        }}
+      >
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="pe-reset"
+          style={{ flex: 1, minWidth: 0, textAlign: "left", ...T.label, fontFamily: SANS, color: INK }}
+        >
+          Earlier runs
+        </button>
+
+        {/* No copy here: each row already links to its own attestation, which
+            is the thing worth taking away. */}
+        <button
+          type="button"
+          aria-hidden
+          tabIndex={-1}
+          onClick={() => setOpen((v) => !v)}
+          className="pe-reset"
+          style={{
+            flexShrink: 0,
+            width: 20,
+            height: 20,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "rgba(27,27,27,0.5)",
+            // Points up when closed: that is the direction it will open.
+            transform: open ? "none" : "rotate(180deg)",
+            transition: "transform 0.18s ease",
+          }}
+        >
+          ▾
+        </button>
+      </div>
+
+      {/*
+        Opens upward, because the box now sits at the bottom of the panel and
+        there is nothing below it to open into. Anchored to this box rather
+        than to the panel, so nothing else on the verdict shifts to make room.
+      */}
+      {open && (
+        <div
+          className="pe-rise"
+          style={{
+            position: "absolute",
+            bottom: `calc(100% + ${SP.half}px)`,
+            right: 0,
+            width: "100%",
+            maxHeight: 240,
+            overflow: "auto",
+            background: SURFACE,
+            border: `${BORDER}px solid ${HAIRLINE}`,
+            borderRadius: R_INSET,
+            padding: SP.x1,
+            boxShadow: "0 12px 32px rgba(27,27,27,0.14)",
+            zIndex: 2,
+          }}
+        >
+          {historyError && (
+            <div style={{ ...small(), color: ERROR, padding: SP.x1 }}>
+              Couldn&rsquo;t read the chain: {historyError}
+            </div>
+          )}
+
+          {!historyError && history.length === 0 && (
+            <div style={{ ...small(), color: MUTED, padding: SP.x1 }}>
+              No runs on this client in the last ~3 hours.
+            </div>
+          )}
+
+          {history.map((h) => (
             <a
-              href={`https://sepolia.etherscan.io/address/${addr}`}
+              key={h.taskId}
+              href={`https://explorer.newton.xyz/testnet/task/${h.taskId}`}
               target="_blank"
               rel="noreferrer"
-              style={{ fontFamily: MONO, fontSize: 11.5, textDecoration: "underline", textUnderlineOffset: 3 }}
+              className="pe-hover"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: SP.x1,
+                padding: `${SP.x1}px`,
+                borderRadius: R.sm,
+                border: `${BORDER}px solid transparent`,
+              }}
             >
-              {short(addr)} ↗
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  background:
+                    h.verdict === "allowed" ? PASS : h.verdict === "denied" ? FLAG : "transparent",
+                  border: h.verdict === "pending" ? `${BORDER}px solid ${MUTED_2}` : "none",
+                }}
+              />
+              <span style={{ fontFamily: MONO, ...T.monoSm, color: BODY }}>{short(h.address)}</span>
+              <span
+                style={{
+                  marginLeft: "auto",
+                  ...T.monoSm,
+                  fontFamily: SANS,
+                  color: h.verdict === "allowed" ? PASS : h.verdict === "denied" ? FLAG : MUTED,
+                }}
+              >
+                {h.verdict === "allowed" ? "Compliant" : h.verdict === "denied" ? "Non Compliant" : "Awaiting"}
+              </span>
+              <span style={{ fontFamily: MONO, ...T.monoSm, color: MUTED_2 }}>↗</span>
             </a>
-          ) : (
-            <span style={{ fontFamily: MONO, fontSize: 11.5, color: MUTED_2 }}>—</span>
-          )}
+          ))}
         </div>
-      ))}
+      )}
     </div>
   );
 }
 
-function Mono({ text }: { text: string }) {
+function CopyBox({ label: name, text }: { label: string; text: string }) {
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -1697,49 +1945,49 @@ function Mono({ text }: { text: string }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1400);
     } catch {
-      /* secure context only */
+      // Clipboard needs a secure context; failing silently beats an error the
+      // reader cannot act on.
     }
   }
 
   return (
-    <div style={{ position: "relative" }}>
-      <button
-        type="button"
-        onClick={copy}
-        className="pe-reset"
+    <button
+      type="button"
+      onClick={copy}
+      className="pe-reset"
+      style={{
+        width: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: SP.x2,
+        padding: `${SP.x1_5}px ${SP.x2}px`,
+        borderRadius: R_INSET,
+        border: `${BORDER}px solid rgba(27,27,27,0.22)`,
+        background: "rgba(255,255,255,0.4)",
+        textAlign: "left",
+        transition: "background 0.18s ease, border-color 0.18s ease",
+      }}
+    >
+      <span style={{ ...T.label, fontFamily: SANS, color: INK }}>{name}</span>
+
+      <span
         style={{
-          position: "absolute",
-          top: 8,
-          right: 8,
+          ...T.monoSm,
+          fontFamily: SANS,
+          flexShrink: 0,
           borderRadius: R_PILL,
-          border: `1px solid ${CONTROL}`,
-          background: SURFACE,
-          padding: "5px 11px",
-          ...label(9),
-          color: MUTED,
+          border: `${BORDER}px solid rgba(27,27,27,0.28)`,
+          padding: `${SP.half}px ${SP.x1_5}px`,
+          color: INK,
         }}
       >
         {copied ? "Copied" : "Copy"}
-      </button>
-      <pre
-        style={{
-          margin: 0,
-          background: FIELD,
-          borderRadius: R_INSET,
-          padding: 16,
-          paddingTop: 34,
-          fontFamily: MONO,
-          fontSize: 11.5,
-          lineHeight: 1.6,
-          whiteSpace: "pre-wrap",
-          color: BODY,
-        }}
-      >
-        {text}
-      </pre>
-    </div>
+      </span>
+    </button>
   );
 }
+
 
 /* ── Reading the operator response ──────────────────────── */
 

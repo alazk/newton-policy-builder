@@ -1,25 +1,23 @@
 import type { Metadata } from "next";
-import { Instrument_Serif, Newsreader } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
 /**
- * Instrument Serif carries verdicts and numerals; Newsreader carries prose.
+ * One family, the whole page.
  *
- * Self-hosted by next/font rather than linked from Google: a <link> to
- * fonts.googleapis.com is a render-blocking request to a third party, and a
- * page whose entire job is a single legible verdict should not depend on
- * someone else's CDN to say it.
+ * The design system's sheets are set in a grotesque — labels, values, headings
+ * and the sample UI all share it. The demo was running two serifs on top of
+ * that (Instrument Serif for verdicts, Newsreader for prose), which is why
+ * adopting the system's spacing and sizes barely showed: the tokens changed
+ * and the voice did not.
+ *
+ * Self-hosted by next/font rather than linked from Google — a page whose
+ * entire job is one legible verdict should not wait on someone else's CDN to
+ * say it.
  */
-const display = Instrument_Serif({
-  weight: "400",
+const sans = Inter({
   subsets: ["latin"],
-  variable: "--font-display",
-  display: "swap",
-});
-
-const prose = Newsreader({
-  subsets: ["latin"],
-  variable: "--font-prose",
+  variable: "--font-sans",
   display: "swap",
 });
 
@@ -44,7 +42,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${display.variable} ${prose.variable}`}>
+    <html lang="en" className={sans.variable}>
       <body>{children}</body>
     </html>
   );

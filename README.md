@@ -1,9 +1,11 @@
-# Newton Policy Builder
+# Newton AML/OFAC Policy Engine
 
-Four steps: **goal → provider → policies → recipient → run.**
+Enter a sender and a recipient. Both are screened against the consolidated
+sanctions lists (OFAC, EU, UN, UK) and an operator quorum signs the decision
+on Ethereum Sepolia **before** the transfer would execute.
 
-"Run" is a real evaluation. The generated Rego goes to a Newton operator and is
-executed against a live oracle contract on Ethereum Sepolia. Nothing is deployed.
+The verdict on screen comes from a real `newt_createTask` — not a simulation.
+It has an attestation you can open in the Newton explorer.
 
 ---
 
@@ -12,165 +14,123 @@ executed against a live oracle contract on Ethereum Sepolia. Nothing is deployed
 ```bash
 cd policy-builder
 npm install
-cp .env.local.example .env.local
-# paste your key from dashboard.newton.xyz → API Keys
-npm run dev
+cp .env.local.example .env.local   # then fill it in — see below
+bash dev.sh
 ```
 
-Open [localhost:3000](http://localhost:3000).
+`dev.sh` kills anything on port 3000, clears `.next`, typechecks (without
+blocking) and starts the server. Those are the three causes of "can't reach
+localhost" when the code is fine.
 
-The API key is read server-side in `app/api/evaluate/route.ts` and never reaches
-the browser. It authenticates to the gateway and authorizes secrets management,
-so keep it that way if you deploy this.
+### Environment
 
----
+`.env.local` is gitignored and never ships. A fresh clone will not run without
+it.
 
-## What makes it work
-
-`simulatePolicy` from `@newton-xyz/sdk` takes **raw Rego plus a deployed
-PolicyData address**. That's the whole reason a builder is possible — whatever the
-wizard composes gets evaluated for real without deploying a contract first.
-
-```ts
-walletClient.simulatePolicy({
-  policyClient,
-  policy: rego,            // ← generated from your selections
-  entrypoint: "newton_builder_policy.allow",
-  intent: { from, to, value, data, chainId, functionSignature },
-  policyData: [{ policyDataAddress, wasmArgs }],
-  policyParams: params,
-});
-```
-
-`simulateTask`, which the docs quickstart uses, only works against an
-already-deployed policy. `simulatePolicy` is the one that accepts arbitrary Rego.
-
----
-
-## The one path that runs with no signup
-
-**Screen for sanctions → Chainalysis Sanctions (Newton-hosted)** uses PolicyData
-`0x30E545603d6205B6887BAb0C1a630aa383d71e07`, a Newton-hosted proxy over the free
-Chainalysis sanctions API. No provider account, no key upload.
-
-The other providers are real deployed oracles on Sepolia, but they need their own
-credentials uploaded (`newton-cli secrets upload`) before they'll answer. The UI
-marks them `needs <KEY>` rather than letting you hit a confusing failure.
-
-| Provider | Sepolia PolicyData | Credentials |
-| --- | --- | --- |
-| Chainalysis (Newton-hosted) | `0x30E5…1e07` | none |
-| Chainalysis pack | `0x223F…8448` | `CHAINALYSIS_SANCTIONS_KEY` |
-| Persona | `0xC8fB…717d` | `PERSONA_API_KEY` |
-| Sumsub | `0xC2a7…3F52` | `SUMSUB_API_KEY` |
-| Webacy | `0x838d…47bF` | `WEBACY_API_KEY` |
-| Blockaid | `0x9769…6384` | `BLOCKAID_API_KEY` |
-
----
-
-## The test that proves it
-
-Step 4 has two shortcut buttons.
-
-- **Clean address** `0x1111…1111` → allowed
-- **Sanctioned address** `0x7F367cC41522cE07553e823bf3be79A889DEbe1B` → denied
-
-The second is a real OFAC SDN listing (Danil Potekhin, designated 2020-09-16). I
-tested the underlying sanctions endpoint directly and it returns two
-identifications for that address and an empty array for the clean one.
-
----
-
-## How the generated Rego is shaped
-
-Every check is a positive assertion plus a negated deny:
-
-```rego
-screening_succeeded if data.data.status == 200
-deny contains "screening_unavailable" if not screening_succeeded
-allow if count(deny) == 0
-```
-
-This is deliberate. Written the obvious way — `allow if data.data.sanctioned ==
-false` — an oracle outage makes the reference undefined, the rule never fires, and
-you're relying on `default allow := false` catching every case. With the deny-set
-form, missing data actively produces a deny you can name and show the user.
-
-That's also why "Fail closed if screening is unavailable" is on by default and
-worth leaving on.
-
----
-
-## Status
-
-**Verified working end to end** against a real Newton operator on Sepolia, using
-the *Local OFAC denylist* provider:
-
-| Recipient | Result |
+| Variable | Why |
 | --- | --- |
-| `0x7F367cC4…DEbe1B` (OFAC SDN) | **Denied** |
-| `0x1111…1111` (clean) | **Allowed** |
+| `NEWTON_API_KEY` | Authenticates to the gateway. Server-side only. |
+| `POLICY_CLIENT_YENTE` | The PolicyClient the task is submitted against. |
+| `NEXT_PUBLIC_POLICY_CLIENT` | Same address, for display. Baked at build time. |
+| `YENTE_URL` | The screening API. Also used by `/api/screen` and `/api/screening-health`. |
+| `SEPOLIA_RPC_URL` | Optional. Defaults to a public endpoint. |
 
-Both round-tripped through `newt_simulatePolicy`. Nothing is deployed — the Rego
-and params go to the gateway and an operator evaluates them.
-
-### What it took to get the request accepted
-
-Four rejections, each a real mismatch between the SDK and this gateway build:
-
-1. `missing field 'chain_id'` — the SDK puts `chain_id` only inside `intent`;
-   this gateway also wants it at the top of `params`. Hence the direct JSON-RPC
-   call instead of `walletClient.simulatePolicy`.
-2. `id: invalid type: integer` — `id` must be a **UUID string**, not a JSON-RPC
-   scalar.
-3. `invalid type: string "0xaa36a7", expected u64` — top-level `chain_id` is a
-   plain integer while the one inside `intent` is a hex quantity. Same name, two
-   encodings.
-4. `policy client … is owned by …, not by caller` — the caller derived from your
-   API key must own the PolicyClient on-chain. The docs say this is only enforced
-   when a PolicyData declares secrets; in practice it's always enforced.
-
-### The bug worth remembering
-
-`extractAllow()` originally returned `false` when it couldn't find the decision,
-and the decision turned out to live at `evaluation_result.result` — a path it
-didn't check. So a clean address rendered as **Denied** while the gateway had
-said `true`.
-
-It now returns `undefined` on an unrecognised shape and the UI shows an error.
-A response you can't parse is not a denial, and rendering it as one is a silent
-lie in the direction that looks safe but isn't — you'd trust a screening result
-that never happened.
-
-### Still open
-
-- **Not typechecked.** The Desktop folder isn't reachable from my sandbox. Run
-  `npx tsc --noEmit` before you rely on it.
-- **Chainalysis is untested.** It needs an API key uploaded via
-  `newton-cli secrets upload`. The custom WASM oracle in `../sanctions-oracle/`
-  *is* deployed and verified end to end — see `verify-both.mjs`.
-- **The denylist is a static snapshot.** Five addresses, frozen. Fine for a
-  demo, wrong for anything real — that's what the WASM oracle solves.
+On Vercel these live in Settings → Environment Variables. Changing them does
+not affect an existing deployment — redeploy after.
 
 ---
 
-## Extending it
+## How a check works
 
-Add a provider or rule in `lib/catalog.ts` — the UI is generated from it, so a new
-entry appears in the wizard with no component changes. Rules return `{ helpers,
-deny }` Rego fragments that get composed into one policy.
+```
+UI ──▶ /api/evaluate ──▶ newt_createTask ──▶ operator quorum
+                                                  │
+                          WASM oracle ──▶ YENTE_URL/match
+                                                  │
+                                    bytes32 evaluation_result
+```
 
-To go from here to a deployed policy: copy the generated Rego, then
-`newton-cli regorus parse` → `policy-files generate-cids` → `policy deploy`. See
-[../ROADMAP.md](../ROADMAP.md) stage 3.
+The oracle screens **both** parties in one lookup and the deployed Rego denies
+on any of nine rules — including `payer_sanctioned`, which is why the sender is
+a field and not a constant.
 
-The CLI installs via `newtup`; latest stable is `v0.5.1`:
+### Three things this codebase learned the hard way
+
+1. **Every failure presents as a denial.** A broken oracle, a wrong data path
+   and a correct sanctions block are indistinguishable if you only ever test an
+   address that should be denied. `../sanctions-oracle/verify-both.mjs` exists
+   for that reason and checks three directions.
+
+2. **The two RPCs answer in different shapes.** `newt_simulatePolicy` returns
+   `evaluation_result.result` as a boolean; `newt_createTask` returns
+   `task_response.evaluation_result` as a **bytes32**. Reading only the first
+   made every submitted task parse as "no verdict", which the UI then rendered
+   as Compliant while the explorer showed the real denial. See `extractAllow`.
+
+3. **The composed policy is not the enforced policy.** In submit mode the
+   operators evaluate the `policyCid` bound on-chain. The "Deployed policy"
+   panel resolves that from the chain (`getPolicyCid` → IPFS) and deliberately
+   does *not* fall back to locally generated Rego.
+
+---
+
+## Fail-closed behaviour
+
+| Condition | Result |
+| --- | --- |
+| Screening API down | `screening_unavailable` → denied |
+| Screening data > 48h old | API returns 503 → `screening_unavailable` → denied |
+| Verdict unreadable | UI shows **No decision**; transfer stays blocked |
+| Either party unscreened | `payee_not_screened` / `payer_not_screened` → denied |
+
+Stale data returning a confident ALLOW was the last fail-open, and it is closed
+in the screening API rather than in the UI — the badge and the watchdog make
+staleness *visible*; only the API refusing makes it *enforced*.
+
+---
+
+## Routes
+
+| Route | Does |
+| --- | --- |
+| `/api/evaluate` | Submits the task. Rate-limited per IP. |
+| `/api/history` | Recent runs, read from Sepolia logs. No database. |
+| `/api/policy-source` | The deployed policy, resolved from chain and fetched from IPFS. |
+| `/api/screen` | Which party is designated, and on which lists. Explanation, not attestation. |
+| `/api/screening-health` | How old the sanctions data is. |
+
+---
+
+## Design system
+
+`lib/ds.ts` holds the tokens — 8px spacing grid, radii, control heights, type
+scale, colour. Components read from it rather than carrying numbers inline.
+Verdict fills keep green and orange; interaction is ink, so the only colour
+that means anything is the outcome.
+
+---
+
+## Deploying
 
 ```bash
-curl -fsSL https://cli.newton.xyz | sh
-export PATH="$HOME/.newton/bin:$PATH"
-newtup
-newton-cli --version
+bash deploy.sh
 ```
 
-If `newtup` is already on the path, `newtup` alone updates it.
+Refuses if a `.env` file is staged, typechecks, runs the real production build
+locally, then commits, pushes and promotes with `vercel --prod`. The `--prod`
+matters: no domain alias is attached, so a git push alone leaves
+`newton-policy-builder.vercel.app` on the previous build.
+
+---
+
+## Known gaps
+
+- **Mobile is untested.** Rules exist below 640px; nobody has opened it on a
+  phone.
+- **Inbound screening is designed, not built** — see `../inbound/DESIGN.md`.
+  You cannot block an inbound transfer on a public chain; you gate the credit.
+- **The rate limit is in-memory**, so it resets with the serverless instance
+  and is not shared between them. Enough for a stuck retry loop, not for a
+  determined abuser.
+- **`lib/catalog.ts` still carries multiple providers and composable rules**
+  that the UI no longer surfaces. It feeds `scripts/emit-rego.mjs`.

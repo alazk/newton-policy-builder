@@ -7,3 +7,7 @@ out
 next-env.d.ts
 .vercel
 .env*
+
+# macOS writes these into every folder you open in Finder. Three of them got
+# committed in the design-system change because `git add -A` takes everything.
+.DS_Store
