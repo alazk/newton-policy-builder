@@ -329,47 +329,29 @@ a {
   .pe-mast {
     padding: 16px !important;
   }
-  .pe-evidence {
-    flex-wrap: wrap;
-  }
 }
 
 /*
- * Rows that share a line with the bottom-right corner boxes.
+ * There is no longer a corner to clear.
  *
- * 300px for the boxes plus a 24px gutter. Capped at 1080 so the measure does
- * not run away on a very wide screen. Below 1100px the corner stops being a
- * corner (see the query underneath) and the reserve is released.
+ * This reserved 324px on the right — 300px of evidence boxes plus a gutter —
+ * so the verdict never ran underneath them. Those boxes are gone, and with
+ * them the `.pe-corner` rules and the 1100px query that unpinned them. What
+ * remains is the half of the job that was always independent of the corner:
+ * stopping the measure running away on a very wide screen.
  */
 .pe-clear-corner {
-  max-width: min(1080px, calc(100% - 324px));
-}
-
-@media (max-width: 1100px) {
-  .pe-clear-corner {
-    max-width: 100%;
-  }
-
-  /*
-   * Not enough width to keep a 300px column out of the verdict's way, so the
-   * boxes rejoin the flow at the end of the panel instead of floating over
-   * it. This is the one place the panel is allowed to grow — and where it
-   * does, the shell's own scroll takes over rather than content being clipped.
-   */
-  .pe-corner {
-    position: static !important;
-    margin-top: 24px;
-  }
+  max-width: 1080px;
 }
 
 /*
  * Phones.
  *
  * The shell is a fixed-height console, which is the right shape on a desktop
- * and the wrong one at 390 × 844: two address fields, four radios, a 72px
- * action and three evidence tabs do not fit in 844px minus browser chrome, and
- * `overflow: hidden` would quietly clip the bottom of a compliance verdict.
- * So below this width the page stops being a console and becomes a document.
+ * and the wrong one at 390 × 844: a field, two radios and a 72px action do not
+ * fit in 844px minus browser chrome, and `overflow: hidden` would quietly clip
+ * the bottom of a compliance verdict. So below this width the page stops being
+ * a console and becomes a document.
  */
 @media (max-width: 640px) {
   .pe-shell {
@@ -401,15 +383,11 @@ a {
     gap: 12px !important;
   }
 
-  /* Verdict detail wraps to one column instead of three cramped ones. */
+  /* Verdict detail wraps to one column instead of two cramped ones. */
   .pe-parties {
     flex-direction: column;
     align-items: flex-start !important;
     gap: 16px !important;
-  }
-
-  .pe-evidence button {
-    flex: 1 1 auto;
   }
 }
 

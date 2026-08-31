@@ -180,7 +180,7 @@ export interface Goal {
 export const GOALS: Record<string, Goal> = {
   sanctions: {
     id: "sanctions",
-    name: "Newton AML/OFAC Policy Engine",
+    name: "Newton Sanctions Policy Engine",
     blurb:
       "Block payments to or from sanctioned addresses, enforced on-chain by an operator quorum before the transaction executes.",
     // OpenSanctions only. The params-only denylist still works and is still

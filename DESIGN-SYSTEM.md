@@ -103,7 +103,7 @@ Global tracking is `-0.006em`; display sizes tighten further per the table.
 point — five decisions where there was one question.
 
 **Labels are sentence case at 14px.** They do not shout. Uppercase tracking
-survives only in the OFAC lockup, where the mark requires it.
+survives only in the masthead lockup, where the mark requires it.
 
 **A timestamp is not a hash.** "Decided" is set in sans, not mono, so it stops
 competing with the addresses beside it.
@@ -220,14 +220,17 @@ Disabled is **outlined, not filled grey** — a filled grey block at this size
 reads as a region, not as a control that is not ready. Border `control`, text
 `muted2`, transparent background, `cursor: not-allowed`.
 
-### Copy box
+### Copy affordance
 
-The pattern for evidence. 12/16 padding, `md` radius, `1px solid
-rgba(27,27,27,0.22)`, translucent white fill, name on the left at `label`, a
-pill-outlined "Copy" on the right at `monoSm`. Confirms as "Copied" for 1.4s.
+Only one survives, on the recipient's address in the verdict: a small
+pill-outlined "Copy" at `monoSm` that confirms as "Copied" for 1.4s, then
+reverts.
 
-Copy targets, not panels. Nobody reads a Rego policy in a drawer on a demo
-screen — they take it somewhere with a scrollbar.
+There used to be a generic `CopyBox` used for the deployed policy, the raw
+operator response and the run history. All three are gone. The rule that
+killed them: an artefact nobody would read in a 300px box on a demo screen
+does not earn a box on the screen — and the one thing worth taking away, the
+attestation, is a link on the rule rather than a copy target.
 
 ### Focus ring
 
@@ -279,23 +282,39 @@ card, so it absorbs the remainder rather than dictating the row. Any time a
 field is added or removed, that floor is the number to recheck — a floor set for
 a two-field column left a void in a one-field column.
 
-### Corner reserve (`.pe-clear-corner`)
+### Measure cap (`.pe-clear-corner`)
 
-`max-width: min(1080px, calc(100% - 324px))` — 300px for the bottom-right
-evidence boxes plus a 24px gutter. Below 1100px the corner stops being a corner
-and the reserve is released.
+`max-width: 1080px`. The class is named for a job it no longer has: it used to
+reserve `calc(100% - 324px)` so the verdict never ran under the 300px evidence
+column pinned bottom-right. That column is gone. What survives is the part that
+was never about the corner — stopping the measure running away on a very wide
+screen.
+
+### Outcome panel order
+
+```
+headline
+reason
+[regime chips, on a denial]
+──────── rule ────────  [stale notice] · New check · View attestation
+recipient · decided
+```
+
+The rule carries both actions. Nothing sits above the headline: an earlier
+build had New check and the stale notice in their own row up there, which cost
+44px of a panel that cannot scroll and put a button in the first thing the eye
+lands on — above the verdict it is meant to follow.
 
 ### Breakpoints
 
-| Width    | Change                                                                 |
-| -------- | ---------------------------------------------------------------------- |
-| ≤ 1100px | Corner boxes rejoin the flow; corner reserve released                   |
-| ≤ 900px  | Console collapses to one column; padding 24/16                          |
-| ≤ 640px  | Shell becomes a document (`height: auto`); radios stack; parties stack  |
+| Width   | Change                                                                 |
+| ------- | ---------------------------------------------------------------------- |
+| ≤ 900px | Console collapses to one column; padding 24/16                          |
+| ≤ 640px | Shell becomes a document (`height: auto`); radios stack; parties stack  |
 
-At 390×844 a fixed-height console cannot hold two fields, radios, a 72px action
-and three evidence tabs without `overflow: hidden` quietly clipping the bottom
-of a compliance verdict. So below 640px the page stops being a console.
+At 390×844 a fixed-height console cannot hold a field, radios and a 72px action
+without `overflow: hidden` quietly clipping the bottom of a compliance verdict.
+So below 640px the page stops being a console.
 
 ---
 
@@ -332,7 +351,12 @@ stuck at its `from` state, which is fully hidden.
 
 ## 10. Copy rules
 
-- **"OFAC"**, not "AML / OFAC".
+- **"Sanctions", never a programme name.** The masthead said "AML / OFAC", then
+  "OFAC", now "Sanctions". The feed is consolidated — US, EU, UN, UK and more —
+  so naming one regime in the chrome undersold it and made the demo look
+  US-only. The only place a jurisdiction appears is the "Listed on" chips,
+  which report an actual match, and those read "US", not "OFAC", so all four
+  are the same kind of thing.
 - **No per-list theatre.** The attestation carries no dataset information. An
   earlier build printed "OFAC no match · EU no match · UN no match · UK no
   match" directly beneath "Non Compliant" — four statements contradicting the
@@ -492,18 +516,13 @@ body {
   gap: 24px;
 }
 
-/* Corner reserve: 300px boxes + 24px gutter */
-.pe-clear-corner { max-width: min(1080px, calc(100% - 324px)); }
-@media (max-width: 1100px) {
-  .pe-clear-corner { max-width: 100%; }
-  .pe-corner { position: static !important; margin-top: 24px; }
-}
+/* Measure cap. Named for a corner that no longer exists. */
+.pe-clear-corner { max-width: 1080px; }
 
 @media (max-width: 900px) {
   .pe-console { grid-template-columns: minmax(0, 1fr); }
   .pe-pad { padding: 24px 16px !important; }
   .pe-mast { padding: 16px !important; }
-  .pe-evidence { flex-wrap: wrap; }
 }
 
 @media (max-width: 640px) {
@@ -513,7 +532,6 @@ body {
   .pe-console { gap: 16px; }
   .pe-radios { flex-direction: column; gap: 12px !important; }
   .pe-parties { flex-direction: column; align-items: flex-start !important; gap: 16px !important; }
-  .pe-evidence button { flex: 1 1 auto; }
 }
 
 /* Controls */

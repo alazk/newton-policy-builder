@@ -1,17 +1,17 @@
 "use client";
 
 /**
- * Newton AML/OFAC Policy Engine.
+ * Newton Sanctions Policy Engine.
  *
  * The deployed policy already decides correctly — that is verified in both
  * directions by sanctions-oracle/verify-both.mjs. What this page has to do is
  * make the decision legible: what was checked, against what, and what happens
  * next.
  *
- * Structure is three floating cards on a grey field: masthead, stage,
- * evidence. The stage is one element that changes state rather than three that
- * take turns — at rest it holds the console, in flight the screening, at the
- * end the verdict fills it edge to edge.
+ * Structure is two floating cards on a grey field: masthead and stage. The
+ * stage is one element that changes state rather than three that take turns —
+ * at rest it holds the console, in flight the screening, at the end the
+ * verdict fills it edge to edge.
  *
  * Three rules it obeys, each of them paid for:
  *
@@ -31,7 +31,7 @@
  *      carries two deny rules this project's builder does not emit.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GOALS, PROVIDERS, SANCTIONED_TEST_ADDRESS } from "@/lib/catalog";
 import { SANCTIONED_POOL } from "@/lib/sanctioned-pool";
 import { C, H, R, SP, T, BORDER } from "@/lib/ds";
@@ -78,7 +78,7 @@ const S2 = SP.x2;
  * This replaces the 9–11px uppercase micro-labels the demo used everywhere.
  * They came from a different reference and were the loudest thing on a page
  * whose job is to state one quiet fact. Uppercase tracking survives only in
- * the OFAC lockup, which is a mark rather than a label.
+ * the masthead lockup, which is a mark rather than a label.
  */
 const label = (): React.CSSProperties => ({
   fontFamily: SANS,
@@ -105,7 +105,6 @@ function randomOrdinary(): string {
 
 const isAddress = (a: string) => /^0x[a-fA-F0-9]{40}$/.test(a);
 const middle = (a: string) => (a.length > 24 ? `${a.slice(0, 16)}…${a.slice(-12)}` : a);
-const short = (a: string) => (a && a.length > 16 ? `${a.slice(0, 8)}…${a.slice(-6)}` : a || "—");
 
 function asText(v: unknown): string {
   if (typeof v === "string") return v;
@@ -165,24 +164,12 @@ type RunState =
   | { status: "running" }
   | { status: "done"; outcome: Outcome; stale?: boolean };
 
-type SharedRun = {
-  taskId: string;
-  address: string;
-  sender?: string;
-  verdict: "allowed" | "denied" | "pending";
-  block: number;
-};
-
-type DeployedPolicy = {
-  source: string;
-  cid: string;
-  entrypoint: string;
-  policyAddress: string;
-  via: string;
-  /** null when the on-chain params could not be decoded — unknown, not absent. */
-  params: Record<string, unknown> | null;
-  expireAfter: number | null;
-};
+/*
+ * SharedRun and DeployedPolicy lived here, describing the shapes of
+ * /api/history and /api/policy-source. Nothing on the client reads either
+ * route now, so the types went with the boxes that used them. Both routes are
+ * still deployed and still correct; the shapes are documented there.
+ */
 
 type ScreeningHealth = {
   ok: boolean;
@@ -207,11 +194,22 @@ const FILL: Record<Verdict, string> = {
  * true reading of a single result — not four queries. The distinction matters
  * for the screening step, which must not animate them being checked in turn.
  */
-const REGIMES = ["OFAC", "EU", "UN", "UK"] as const;
+const REGIMES = ["US", "EU", "UN", "UK"] as const;
 
+/**
+ * Jurisdictions, not programme names.
+ *
+ * These chips only appear on a denial, and only for datasets that actually
+ * matched — so this is the one place the page reports *which* list someone is
+ * on, which is a finding rather than a label. It reads "US" instead of "OFAC"
+ * to keep the four consistent: the others are already jurisdictions, and
+ * mixing a US agency in with three countries made OFAC look like the point
+ * rather than one source among several. The dataset ids underneath are
+ * OpenSanctions' and are untouched.
+ */
 const DATASET_REGIME: Record<string, (typeof REGIMES)[number]> = {
-  us_ofac_sdn: "OFAC",
-  us_ofac_cons: "OFAC",
+  us_ofac_sdn: "US",
+  us_ofac_cons: "US",
   eu_fsf: "EU",
   un_sc_sanctions: "UN",
   gb_hmt_sanctions: "UK",
@@ -274,13 +272,14 @@ export default function Wizard() {
    */
   const [toPick, setToPick] = useState<Pick>(null);
   const [focus, setFocus] = useState<"to" | null>(null);
-  const [picked, setPicked] = useState<"clean" | "ofac" | null>(null);
   const [run, setRun] = useState<RunState>({ status: "idle" });
 
-  const [history, setHistory] = useState<SharedRun[]>([]);
-  const [historyError, setHistoryError] = useState<string | null>(null);
-  const [deployed, setDeployed] = useState<DeployedPolicy | null>(null);
-  const [deployedError, setDeployedError] = useState<string | null>(null);
+  /*
+   * Run history and the deployed policy source used to be fetched here, for
+   * the two boxes in the bottom-right corner. Both boxes are gone, so both
+   * fetches are too — a page that pulls the chain on mount to render nothing
+   * is just a slower page.
+   */
   const [health, setHealth] = useState<ScreeningHealth | null>(null);
   /** Set when the throttle refuses a run; cleared on the next attempt. */
   const [throttled, setThrottled] = useState<string | null>(null);
@@ -307,19 +306,6 @@ export default function Wizard() {
   const busy = run.status === "running";
   const ready = applied && toValid && !busy;
 
-  const loadHistory = useCallback(async () => {
-    try {
-      const res = await fetch("/api/history");
-      const json = await res.json();
-      if (json.ok) {
-        setHistory(json.runs ?? []);
-        setHistoryError(null);
-      } else setHistoryError(asText(json.error));
-    } catch (e) {
-      setHistoryError(asText(e));
-    }
-  }, []);
-
   /**
    * Nothing restores the fields. They are empty on load, always.
    *
@@ -331,19 +317,14 @@ export default function Wizard() {
    */
 
   useEffect(() => {
-    loadHistory();
-
-    fetch("/api/policy-source")
-      .then((r) => r.json())
-      .then((j) => (j.ok ? setDeployed(j) : setDeployedError(asText(j.error))))
-      .catch((e) => setDeployedError(asText(e)));
-
-    // Unknown freshness counts as stale, never as healthy-until-proven.
+    // Unknown freshness counts as stale, never as healthy-until-proven. This
+    // is the only thing the page needs before a run: a confident ALLOW on a
+    // week-old list looks exactly like a correct one.
     fetch("/api/screening-health")
       .then((r) => r.json())
       .then((j) => setHealth(j.ok ? j : { ok: false, stale: true, ageHours: null, count: null }))
       .catch(() => setHealth({ ok: false, stale: true, ageHours: null, count: null }));
-  }, [loadHistory]);
+  }, []);
 
   /** A verdict must never quietly outlive the inputs that produced it. */
   function invalidate() {
@@ -453,8 +434,6 @@ export default function Wizard() {
           decidedAt: new Date().toISOString(),
         },
       });
-
-      loadHistory();
 
       /**
        * Attribution, after the fact.
@@ -618,7 +597,6 @@ export default function Wizard() {
             onVerify={verify}
             toValid={toValid}
             throttled={throttled}
-            policyText={policyTextOf(deployed, deployedError, provider)}
           />
         )}
 
@@ -632,14 +610,6 @@ export default function Wizard() {
             to={to}
             stale={run.status === "done" && Boolean(run.stale)}
             onReset={reset}
-            /*
-             * Copy targets, not panels. The detail belongs to this decision,
-             * but nobody reads a Rego policy in a drawer on a demo screen —
-             * they take it somewhere with a scrollbar.
-             */
-            evidence={
-              <EvidenceRail raw={asText(done.raw)} history={history} historyError={historyError} />
-            }
           />
         )}
       </div>
@@ -682,7 +652,11 @@ function Masthead({ health, onHome }: { health: ScreeningHealth | null; onHome: 
           <img src="/newton-logo.svg" alt="Newton" style={{ height: 18, display: "block" }} />
         </button>
         {/* The one place uppercase tracking survives: this is a lockup, not a
-            field label, and the sheet has no opinion on marks. */}
+            field label, and the sheet has no opinion on marks.
+
+            "Sanctions", not "OFAC". The policy screens a consolidated feed —
+            US, EU, UN, UK and more — so naming one regime in the masthead
+            undersold it and made the demo look US-only. */}
         <span
           style={{
             background: INK,
@@ -696,7 +670,7 @@ function Masthead({ health, onHome }: { health: ScreeningHealth | null; onHome: 
             padding: `${SP.x1}px ${SP.x2}px`,
           }}
         >
-          OFAC
+          Sanctions
         </span>
       </div>
 
@@ -759,10 +733,8 @@ function Console(props: {
   onVerify: () => void;
   toValid: boolean;
   throttled: string | null;
-  policyText: string;
 }) {
-  const { applied, onApply, to, focus, setFocus, onTo, toPick, onPickTo, ready, onVerify, toValid, throttled, policyText } =
-    props;
+  const { applied, onApply, to, focus, setFocus, onTo, toPick, onPickTo, ready, onVerify, toValid, throttled } = props;
 
   const hint = throttled
     ? throttled
@@ -806,14 +778,13 @@ function Console(props: {
               /*
                * Fills its column rather than setting the row's height.
                *
-               * The floor was 256 when the transfer column held two address
-               * fields and stood 460 tall. With one field that column is 284,
-               * so a 256 floor plus its heading, gutters and the copy box
-               * made THIS column the taller one — and the transfer column
-               * grew a void between the field and the button to match. The
-               * floor drops below what the opposite column needs and `flex:
-               * 1` takes up whatever is left, so the two bottom edges stay
-               * level without either side dictating the height.
+               * The transfer column opposite is 284 by arithmetic: heading 20
+               * + 16 + field 160 + 16 + action 72. This card is the only thing
+               * under this column's heading now that the copy box is gone, so
+               * `flex: 1` stretches it to whatever that leaves — 248 — and the
+               * two bottom edges stay level without either side dictating the
+               * height. The floor only matters if the opposite column ever
+               * gets shorter than it.
                */
               flex: 1,
               minHeight: SP.x10 * 2, // 160
@@ -860,12 +831,6 @@ function Console(props: {
             </div>
           </button>
 
-          {/*
-            Readable before a run, not only after one.
-            The deployed policy was reachable only from the verdict, so anyone
-            who wanted to know what would be enforced had to enforce it first.
-          */}
-          <CopyBox label="Deployed policy" text={policyText} />
         </div>
 
         {/* 02 */}
@@ -1046,7 +1011,7 @@ function Pickers({
     {
       value: "ofac",
       text: "Sanctioned address",
-      hint: `A real OFAC-designated wallet from the live feed`,
+      hint: `A real designated wallet from the live sanctions feed`,
     },
   ];
 
@@ -1248,7 +1213,7 @@ function Screening({ to, onCancel }: { to: string; onCancel: () => void }) {
           Task submitted to the Newton gateway
         </Step>
         <Step n={2}>
-          Both addresses screened against the consolidated list — OFAC, EU, UN and UK in one lookup
+          Screened against the consolidated sanctions list in a single lookup
         </Step>
         <Step n={3}>Operator quorum evaluates the policy and signs the result</Step>
       </div>
@@ -1286,13 +1251,11 @@ function Decision({
   to,
   stale,
   onReset,
-  evidence,
 }: {
   outcome: Outcome;
   to: string;
   stale: boolean;
   onReset: () => void;
-  evidence: React.ReactNode;
 }) {
   /**
    * The fill is its own layer so it can be clipped in independently of the
@@ -1355,47 +1318,14 @@ function Decision({
         }}
       >
         {/*
-          New check sits top-right of the outcome, directly under the network
-          badge — the same corner the page already uses for "state of the
-          system" rather than buried in a strip at the bottom.
+          Nothing above the headline any more.
+
+          New check used to sit up here in its own row with the stale notice,
+          which cost 44px of a panel that cannot scroll and put a button in
+          the first thing the eye lands on — above the verdict it is meant to
+          follow. It has moved down to the rule, next to the explorer link,
+          where the two things you can do now live together.
         */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-            gap: SP.x3,
-            marginBottom: SP.x3,
-          }}
-        >
-          <div style={{ ...small(), color: BODY, minHeight: 20 }}>
-            {stale ? "Inputs changed · run again" : ""}
-          </div>
-
-          {/* The way out, and nothing else. The evidence has its own corner. */}
-          <div style={{ flexShrink: 0 }}>
-            <button
-              type="button"
-              onClick={onReset}
-              className="pe-reset"
-              style={{
-                height: H.control,
-                padding: `0 ${SP.x3}px`,
-                borderRadius: R_PILL,
-                border: `${BORDER}px solid ${INK}`,
-                background: "transparent",
-                color: INK,
-                ...T.label,
-                fontFamily: SANS,
-                display: "flex",
-                alignItems: "center",
-              }}
-            >
-              New check
-            </button>
-          </div>
-        </div>
-
         <div
           className="pe-reveal"
           style={{
@@ -1520,12 +1450,17 @@ function Decision({
           </div>
 
       {/*
-        The attestation link rides the divider.
+        Both actions ride the divider.
 
-        It was down among the parties, competing with three blocks of address
-        detail for the same eye. On the rule it separates the finding above
-        from the evidence below — which is exactly what following the link
-        does.
+        The rule separates the finding above from the detail below, which is
+        the right place for "what now" — you have read the verdict, and these
+        are the two things you can do about it. New check is outlined and goes
+        first; the attestation is filled and goes last, because it is the one
+        that leaves the page.
+
+        The stale notice sits on the left of the same rule. It used to have
+        its own row at the top of the panel, which reserved 20px plus a 24px
+        margin permanently for a string that is empty almost always.
       */}
       <div
         className="pe-clear-corner"
@@ -1536,7 +1471,31 @@ function Decision({
           margin: `${SP.x4}px 0 ${SP.x3}px`,
         }}
       >
+        {stale && (
+          <span style={{ ...small(), color: BODY, flexShrink: 0 }}>Inputs changed · run again</span>
+        )}
+
         <div style={{ flex: 1, height: 1, background: "rgba(27,27,27,0.16)" }} />
+
+        <button
+          type="button"
+          onClick={onReset}
+          className="pe-reset"
+          style={{
+            flexShrink: 0,
+            height: H.control,
+            padding: `0 ${SP.x3}px`,
+            borderRadius: R_PILL,
+            border: `${BORDER}px solid ${INK}`,
+            background: "transparent",
+            color: INK,
+            display: "flex",
+            alignItems: "center",
+            ...label(),
+          }}
+        >
+          New check
+        </button>
 
         {outcome.explorerUrl && (
           <a
@@ -1561,7 +1520,7 @@ function Decision({
       </div>
 
       <div
-        className="pe-parties pe-clear-corner"
+        className="pe-parties"
         style={{ display: "flex", alignItems: "flex-end", gap: SP.x3, flexWrap: "wrap" }}
       >
         {/* No Designated/Clear tag when nothing was screened — an unscreened
@@ -1580,32 +1539,7 @@ function Decision({
           <span style={{ ...small() }}>{stamp(outcome.decidedAt)}</span>
         </div>
 
-        {/*
-          "Previous" lived here. Earlier runs already carries the contrast,
-          with more of it — and this block only appeared when two verdicts
-          disagreed, so the bottom row changed shape depending on history.
-        */}
-        </div>
-
-        {/*
-          Bottom right, and out of flow.
-
-          Absolute means it cannot push the verdict around no matter what it
-          contains — which is what lets the panel stay unscrollable. The
-          content column reserves room for it (paddingRight below) so the
-          parties never run underneath.
-        */}
-        <div
-          className="pe-corner"
-          style={{
-            position: "absolute",
-            right: "clamp(24px, 4vw, 56px)",
-            bottom: "clamp(20px, 4vh, 56px)",
-            zIndex: 1,
-          }}
-        >
-          {evidence}
-        </div>
+      </div>
       </div>
     </>
   );
@@ -1670,264 +1604,23 @@ function PartyBlock({ name, address, party }: { name: string; address: string; p
   );
 }
 
-/* ── Evidence ───────────────────────────────────────────── */
-
-/**
- * What gets copied under "Deployed policy": the addresses that identify it,
- * the CID it was fetched from, the one parameter that is a judgment rather
- * than plumbing, and then the Rego. Pasted anywhere, it still says what it is.
- */
-function policyTextOf(
-  deployed: DeployedPolicy | null,
-  deployedError: string | null,
-  provider: { policyData?: string } | undefined,
-): string {
-  if (!deployed?.source) {
-    return deployedError
-      ? `Couldn't fetch the deployed policy.\n\n${deployedError}`
-      : "Resolving from chain…";
-  }
-
-  return [
-    `# PolicyClient  ${process.env.NEXT_PUBLIC_POLICY_CLIENT ?? "—"}`,
-    `# Policy        ${deployed.policyAddress}`,
-    `# Oracle        ${provider?.policyData ?? "—"}`,
-    `# CID           ${deployed.cid}`,
-    `# min_match_score ${
-      deployed.params && typeof deployed.params.min_match_score === "number"
-        ? deployed.params.min_match_score
-        : "not set — defaults to 0, so any confirmed match denies"
-    }`,
-    "",
-    deployed.source,
-  ].join("\n");
-}
-
-/**
- * Three things worth taking away, and a button that takes each.
+/*
+ * The evidence rail is gone.
  *
- * This has been a bottom strip, a panel at the foot, a side column and a
- * floating drawer. Every one of them rearranged the verdict in order to
- * describe it, and none of them was what the detail is actually for: nobody
- * reads a Rego policy or a gateway JSON blob in a 200px window on a demo
- * screen. They copy it and read it somewhere that has a scrollbar and a
- * search box.
+ * It went through a bottom strip, a panel at the foot, a side column, a
+ * floating drawer and finally two small copy boxes anchored out of flow in
+ * the bottom-right corner. Every version was an attempt to answer "where does
+ * the detail live" without letting the detail rearrange the verdict.
  *
- * So there is nothing to expand. Three small boxes, each naming what it holds
- * and handing it over.
+ * The answer turned out to be that it does not live on this screen. The raw
+ * gateway response, the deployed Rego and the shared run history are three
+ * things nobody reads in a 300px box next to a decision — and the one link
+ * that matters, the attestation, is on the rule where it can't be missed.
+ *
+ * The routes behind them still work: /api/policy-source resolves the deployed
+ * policy from the chain and /api/history reads the shared feed. Nothing on
+ * the client calls them any more.
  */
-function EvidenceRail(props: {
-  raw: string;
-  history: SharedRun[];
-  historyError: string | null;
-}) {
-  const { raw, history, historyError } = props;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: SP.x1, width: 300 }}>
-      {/*
-        Two things, and they behave differently on purpose.
-
-        The gateway response is a JSON blob — unreadable in a 300px box, so it
-        is a copy target. A handful of runs is readable: verdict, address,
-        link. So that one opens.
-
-        Deployed policy is neither; it lives in the console, where it can be
-        read before a decision rather than after one, and it does not change
-        between runs.
-      */}
-      <CopyBox label="Operator response" text={raw} />
-      <RunsBox history={history} historyError={historyError} />
-    </div>
-  );
-}
-
-function RunsBox({ history, historyError }: { history: SharedRun[]; historyError: string | null }) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div style={{ position: "relative", width: "100%" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: SP.x1,
-          padding: `${SP.x1_5}px ${SP.x2}px`,
-          borderRadius: R_INSET,
-          border: `${BORDER}px solid ${open ? INK : "rgba(27,27,27,0.22)"}`,
-          background: "rgba(255,255,255,0.4)",
-          transition: "border-color 0.18s ease",
-        }}
-      >
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-          className="pe-reset"
-          style={{ flex: 1, minWidth: 0, textAlign: "left", ...T.label, fontFamily: SANS, color: INK }}
-        >
-          Earlier runs
-        </button>
-
-        {/* No copy here: each row already links to its own attestation, which
-            is the thing worth taking away. */}
-        <button
-          type="button"
-          aria-hidden
-          tabIndex={-1}
-          onClick={() => setOpen((v) => !v)}
-          className="pe-reset"
-          style={{
-            flexShrink: 0,
-            width: 20,
-            height: 20,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "rgba(27,27,27,0.5)",
-            // Points up when closed: that is the direction it will open.
-            transform: open ? "none" : "rotate(180deg)",
-            transition: "transform 0.18s ease",
-          }}
-        >
-          ▾
-        </button>
-      </div>
-
-      {/*
-        Opens upward, because the box now sits at the bottom of the panel and
-        there is nothing below it to open into. Anchored to this box rather
-        than to the panel, so nothing else on the verdict shifts to make room.
-      */}
-      {open && (
-        <div
-          className="pe-rise"
-          style={{
-            position: "absolute",
-            bottom: `calc(100% + ${SP.half}px)`,
-            right: 0,
-            width: "100%",
-            maxHeight: 240,
-            overflow: "auto",
-            background: SURFACE,
-            border: `${BORDER}px solid ${HAIRLINE}`,
-            borderRadius: R_INSET,
-            padding: SP.x1,
-            boxShadow: "0 12px 32px rgba(27,27,27,0.14)",
-            zIndex: 2,
-          }}
-        >
-          {historyError && (
-            <div style={{ ...small(), color: ERROR, padding: SP.x1 }}>
-              Couldn&rsquo;t read the chain: {historyError}
-            </div>
-          )}
-
-          {!historyError && history.length === 0 && (
-            <div style={{ ...small(), color: MUTED, padding: SP.x1 }}>
-              No runs on this client in the last ~3 hours.
-            </div>
-          )}
-
-          {history.map((h) => (
-            <a
-              key={h.taskId}
-              href={`https://explorer.newton.xyz/testnet/task/${h.taskId}`}
-              target="_blank"
-              rel="noreferrer"
-              className="pe-hover"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: SP.x1,
-                padding: `${SP.x1}px`,
-                borderRadius: R.sm,
-                border: `${BORDER}px solid transparent`,
-              }}
-            >
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  flexShrink: 0,
-                  background:
-                    h.verdict === "allowed" ? PASS : h.verdict === "denied" ? FLAG : "transparent",
-                  border: h.verdict === "pending" ? `${BORDER}px solid ${MUTED_2}` : "none",
-                }}
-              />
-              <span style={{ fontFamily: MONO, ...T.monoSm, color: BODY }}>{short(h.address)}</span>
-              <span
-                style={{
-                  marginLeft: "auto",
-                  ...T.monoSm,
-                  fontFamily: SANS,
-                  color: h.verdict === "allowed" ? PASS : h.verdict === "denied" ? FLAG : MUTED,
-                }}
-              >
-                {h.verdict === "allowed" ? "Compliant" : h.verdict === "denied" ? "Non Compliant" : "Awaiting"}
-              </span>
-              <span style={{ fontFamily: MONO, ...T.monoSm, color: MUTED_2 }}>↗</span>
-            </a>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CopyBox({ label: name, text }: { label: string; text: string }) {
-  const [copied, setCopied] = useState(false);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
-    } catch {
-      // Clipboard needs a secure context; failing silently beats an error the
-      // reader cannot act on.
-    }
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={copy}
-      className="pe-reset"
-      style={{
-        width: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: SP.x2,
-        padding: `${SP.x1_5}px ${SP.x2}px`,
-        borderRadius: R_INSET,
-        border: `${BORDER}px solid rgba(27,27,27,0.22)`,
-        background: "rgba(255,255,255,0.4)",
-        textAlign: "left",
-        transition: "background 0.18s ease, border-color 0.18s ease",
-      }}
-    >
-      <span style={{ ...T.label, fontFamily: SANS, color: INK }}>{name}</span>
-
-      <span
-        style={{
-          ...T.monoSm,
-          fontFamily: SANS,
-          flexShrink: 0,
-          borderRadius: R_PILL,
-          border: `${BORDER}px solid rgba(27,27,27,0.28)`,
-          padding: `${SP.half}px ${SP.x1_5}px`,
-          color: INK,
-        }}
-      >
-        {copied ? "Copied" : "Copy"}
-      </span>
-    </button>
-  );
-}
-
 
 /* ── Reading the operator response ──────────────────────── */
 

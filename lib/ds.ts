@@ -58,7 +58,7 @@ export const H = {
  * These replace the 9–11px uppercase micro-labels the demo used previously.
  * The sheet's label is sentence case at 14px, so labels no longer shout —
  * uppercase tracking survives only where the sheet has no opinion and the
- * mark requires it (the OFAC lockup).
+ * mark requires it (the masthead lockup).
  */
 export const T = {
   label: { fontSize: 14, lineHeight: "20px", fontWeight: 500 },

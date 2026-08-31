@@ -1,8 +1,13 @@
-# Newton AML/OFAC Policy Engine
+# Newton Sanctions Policy Engine
 
-Enter a sender and a recipient. Both are screened against the consolidated
-sanctions lists (OFAC, EU, UN, UK) and an operator quorum signs the decision
-on Ethereum Sepolia **before** the transfer would execute.
+Enter a recipient. It is screened against a consolidated sanctions feed (US,
+EU, UN, UK and others) and an operator quorum signs the decision on Ethereum
+Sepolia **before** the transfer would execute.
+
+The policy screens both parties — it denies `payer_not_screened` when one is
+missing — so every run also carries a sender. That sender is freshly generated
+random bytes rather than a second field: random is on no list, so it can only
+ever be the clean half, and the recipient stays the only variable.
 
 The verdict on screen comes from a real `newt_createTask` — not a simulation.
 It has an attestation you can open in the Newton explorer.
