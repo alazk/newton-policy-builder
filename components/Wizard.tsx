@@ -128,8 +128,8 @@ type Party = { address: string; screened: boolean; sanctioned: boolean | null; d
 /**
  * Four outcomes, because there are four.
  *
- *   pass        — neither party designated
- *   block       — a party is designated
+ *   pass        — the recipient is not designated
+ *   block       — the recipient is designated
  *   unavailable — the policy denied because it could not screen. The transfer
  *                 is blocked and nobody is accused; painting this orange next
  *                 to the word "Non Compliant" would tell someone their
@@ -255,16 +255,25 @@ export default function Wizard() {
    * first thing this page has to establish is what it is screening.
    */
   const [to, setTo] = useState("");
-  const [from, setFrom] = useState("");
+
+  /*
+   * There is no sender state, and no sender field.
+   *
+   * The deployed policy still screens both parties — it denies
+   * `payer_not_screened` when one is missing — so a run has to carry a sender
+   * whether or not the page asks for one. verify() generates fresh random 20
+   * bytes for it: on no list, so it can only ever be the clean half, and the
+   * recipient stays the single variable. Nothing to render, so nothing to
+   * hold in state.
+   */
 
   /**
-   * Which shortcut last filled each field, so the buttons can show state.
+   * Which shortcut last filled the field, so the buttons can show state.
    * Cleared when the address is typed by hand — the shortcut is no longer the
    * source of what is in the box.
    */
   const [toPick, setToPick] = useState<Pick>(null);
-  const [fromPick, setFromPick] = useState<Pick>(null);
-  const [focus, setFocus] = useState<"to" | "from" | null>(null);
+  const [focus, setFocus] = useState<"to" | null>(null);
   const [picked, setPicked] = useState<"clean" | "ofac" | null>(null);
   const [run, setRun] = useState<RunState>({ status: "idle" });
 
@@ -286,9 +295,7 @@ export default function Wizard() {
   function reset() {
     setRun({ status: "idle" });
     setTo("");
-    setFrom("");
     setToPick(null);
-    setFromPick(null);
     setThrottled(null);
     window.history.replaceState(null, "", window.location.pathname);
   }
@@ -297,22 +304,8 @@ export default function Wizard() {
   const abortRef = useRef<AbortController | null>(null);
 
   const toValid = isAddress(to);
-  const fromValid = isAddress(from);
   const busy = run.status === "running";
-
-  /**
-   * Either party is enough.
-   *
-   * The policy needs both — an unscreened party is a denial, not a skip — but
-   * that is the policy's problem, not the visitor's. Leave one empty and a
-   * clean address is generated for it at submit time and shown in the result,
-   * so the transfer is complete and the side you care about is the only
-   * variable. Requiring both meant pasting an address you had no opinion
-   * about before you could test the one you did.
-   */
-  const anyFilled = toValid || fromValid;
-  const noneBroken = (!to || toValid) && (!from || fromValid);
-  const ready = applied && anyFilled && noneBroken && !busy;
+  const ready = applied && toValid && !busy;
 
   const loadHistory = useCallback(async () => {
     try {
@@ -374,12 +367,16 @@ export default function Wizard() {
   }
 
   async function verify() {
-    // Whatever was left blank gets a clean address, committed to state so the
-    // result shows exactly what was screened.
-    const sendTo = toValid ? to : randomOrdinary();
-    const sendFrom = fromValid ? from : randomOrdinary();
-    if (sendTo !== to) setTo(sendTo);
-    if (sendFrom !== from) setFrom(sendFrom);
+    /**
+     * A fresh sender every run.
+     *
+     * The policy requires one — `payer_not_screened` denies when a party is
+     * missing — so the transfer always carries a sender even though the page
+     * no longer asks for one. Random 20 bytes is on no list, which keeps the
+     * recipient the only thing under test.
+     */
+    const sendTo = to;
+    const sendFrom = randomOrdinary();
 
     const ac = new AbortController();
     abortRef.current = ac;
@@ -447,7 +444,7 @@ export default function Wizard() {
           verdict: allow ? "pass" : "block",
           headline: allow ? "Compliant" : "Non Compliant",
           reason: allow
-            ? "Neither party is designated. The transfer may proceed."
+            ? "The recipient is not designated. The transfer may proceed."
             : "The transfer is blocked.",
           denies: extractDenies(json.result),
           datasets: extractDatasets(json.result),
@@ -604,7 +601,6 @@ export default function Wizard() {
               invalidate();
             }}
             to={to}
-            from={from}
             focus={focus}
             setFocus={setFocus}
             onTo={(v) => {
@@ -612,43 +608,28 @@ export default function Wizard() {
               setToPick(null);
               invalidate();
             }}
-            onFrom={(v) => {
-              setFrom(v);
-              setFromPick(null);
-              invalidate();
-            }}
             toPick={toPick}
-            fromPick={fromPick}
-            // Each party gets its own pair, so any combination is one click
-            // per side — clean/clean, sanctioned/clean, either direction.
             onPickTo={(kind) => {
               setTo(kind === "clean" ? randomOrdinary() : randomSanctioned(to));
               setToPick(kind);
               invalidate();
             }}
-            onPickFrom={(kind) => {
-              setFrom(kind === "clean" ? randomOrdinary() : randomSanctioned(from));
-              setFromPick(kind);
-              invalidate();
-            }}
             ready={ready}
             onVerify={verify}
             toValid={toValid}
-            fromValid={fromValid}
             throttled={throttled}
             policyText={policyTextOf(deployed, deployedError, provider)}
           />
         )}
 
         {run.status === "running" && (
-          <Screening to={to} from={from} onCancel={() => abortRef.current?.abort()} />
+          <Screening to={to} onCancel={() => abortRef.current?.abort()} />
         )}
 
         {done && (
           <Decision
             outcome={done}
             to={to}
-            from={from}
             stale={run.status === "done" && Boolean(run.stale)}
             onReset={reset}
             /*
@@ -769,57 +750,28 @@ function Console(props: {
   applied: boolean;
   onApply: () => void;
   to: string;
-  from: string;
-  focus: "to" | "from" | null;
-  setFocus: (v: "to" | "from" | null) => void;
+  focus: "to" | null;
+  setFocus: (v: "to" | null) => void;
   onTo: (v: string) => void;
-  onFrom: (v: string) => void;
   toPick: Pick;
-  fromPick: Pick;
   onPickTo: (k: "clean" | "ofac") => void;
-  onPickFrom: (k: "clean" | "ofac") => void;
   ready: boolean;
   onVerify: () => void;
   toValid: boolean;
-  fromValid: boolean;
   throttled: string | null;
   policyText: string;
 }) {
-  const {
-    applied,
-    onApply,
-    to,
-    from,
-    focus,
-    setFocus,
-    onTo,
-    onFrom,
-    toPick,
-    fromPick,
-    onPickTo,
-    onPickFrom,
-    ready,
-    onVerify,
-    toValid,
-    fromValid,
-    throttled,
-    policyText,
-  } = props;
+  const { applied, onApply, to, focus, setFocus, onTo, toPick, onPickTo, ready, onVerify, toValid, throttled, policyText } =
+    props;
 
-  /**
-   * Either party is enough; whatever is left blank gets a clean address. So
-   * the only things worth saying are "no policy" and "that is not an
-   * address" — nagging for a second address you have no opinion about is
-   * asking the visitor to do the demo's homework.
-   */
   const hint = throttled
     ? throttled
     : !applied
       ? "No policy applied"
-      : (to && !toValid) || (from && !fromValid)
+      : to && !toValid
         ? "Not a valid address"
-        : !toValid && !fromValid
-          ? "Fill either party"
+        : !toValid
+          ? "Enter a recipient"
           : "";
 
   return (
@@ -851,10 +803,20 @@ function Console(props: {
               border: `${BORDER}px solid ${applied ? INK : "transparent"}`,
               borderRadius: R_INSET,
               padding: 26,
-              // Fills its column instead of floating at a fixed height, which
-              // left it stranded beside a much taller second step.
+              /*
+               * Fills its column rather than setting the row's height.
+               *
+               * The floor was 256 when the transfer column held two address
+               * fields and stood 460 tall. With one field that column is 284,
+               * so a 256 floor plus its heading, gutters and the copy box
+               * made THIS column the taller one — and the transfer column
+               * grew a void between the field and the button to match. The
+               * floor drops below what the opposite column needs and `flex:
+               * 1` takes up whatever is left, so the two bottom edges stay
+               * level without either side dictating the height.
+               */
               flex: 1,
-              minHeight: SP.x10 * 3.2, // 256, on the grid
+              minHeight: SP.x10 * 2, // 160
               display: "flex",
               flexDirection: "column",
               width: "100%",
@@ -885,9 +847,12 @@ function Console(props: {
               </span>
             </div>
 
-            <div style={{ ...T.value, fontFamily: SANS, color: BODY, marginTop: SP.x2, maxWidth: "34ch" }}>
-              Blocks the transfer if either party appears on a sanctions list. Enforced by an operator
-              quorum before the transaction executes.
+            {/* "Either party" was accurate when the page had two fields. It
+                still screens both — the sender is generated — but the card
+                should describe what you can change. */}
+            <div style={{ ...T.value, fontFamily: SANS, color: BODY, marginTop: SP.x2, maxWidth: "46ch" }}>
+              Blocks the transfer if the recipient is sanctioned. Enforced by an operator quorum
+              before it executes.
             </div>
 
             <div style={{ marginTop: "auto", paddingTop: SP.x3, ...label(), color: applied ? INK : FLAG }}>
@@ -917,12 +882,11 @@ function Console(props: {
           </div>
 
           {/*
-            Each party owns its own shortcuts. One control that filled
-            "whichever side is selected" meant reading a mode indicator to
-            know where a click would land; two pairs means the button you
-            press is next to the box it fills, and any combination —
-            sanctioned sender with a clean recipient, both dirty, either
-            direction — is one click per side.
+            One field, because there is one question: is this address on a
+            list. The sender is still screened — the deployed policy denies
+            payer_not_screened — but it is generated, not asked for, so the
+            screen does not make the visitor invent a second address they
+            have no opinion about.
           */}
           <Field
             name="Recipient"
@@ -935,25 +899,6 @@ function Console(props: {
             invalid={Boolean(to) && !toValid}
           >
             <Pickers picked={toPick} onPick={onPickTo} party="recipient" empty={!to} />
-          </Field>
-
-          {/*
-            The sender is a field because the deployed policy screens it. It
-            was hardcoded and invisible for the whole life of this demo, which
-            left payer_sanctioned and payer_not_screened — half the policy —
-            unreachable from the interface.
-          */}
-          <Field
-            name="Sender"
-            raw={from}
-            focused={focus === "from"}
-            onFocus={() => setFocus("from")}
-            onBlur={() => setFocus(null)}
-            onChange={onFrom}
-            onEnter={() => ready && onVerify()}
-            invalid={Boolean(from) && !fromValid}
-          >
-            <Pickers picked={fromPick} onPick={onPickFrom} party="sender" empty={!from} />
           </Field>
 
           {/*
@@ -1218,7 +1163,7 @@ function Radio({
  * The bar is indeterminate on purpose: there is no percentage to read from a
  * quorum, and a moving number would be invented.
  */
-function Screening({ to, from, onCancel }: { to: string; from: string; onCancel: () => void }) {
+function Screening({ to, onCancel }: { to: string; onCancel: () => void }) {
   return (
     <div
       style={{
@@ -1272,7 +1217,7 @@ function Screening({ to, from, onCancel }: { to: string; from: string; onCancel:
           marginTop: SP.x3,
         }}
       >
-        Screening both parties
+        Screening the recipient
       </div>
 
       <div className="pe-sweep" style={{ marginTop: SP.x3, borderRadius: R_INSET, maxWidth: 620 }}>
@@ -1289,8 +1234,6 @@ function Screening({ to, from, onCancel }: { to: string; from: string; onCancel:
         >
           <span style={{ ...small(), color: MUTED }}>Recipient</span>
           <span style={{ fontFamily: MONO, ...T.mono, color: BODY }}>{middle(to)}</span>
-          <span style={{ ...small(), color: MUTED }}>Sender</span>
-          <span style={{ fontFamily: MONO, ...T.mono, color: BODY }}>{middle(from)}</span>
         </div>
       </div>
 
@@ -1341,14 +1284,12 @@ function Step({ n, children, done }: { n: number; children: React.ReactNode; don
 function Decision({
   outcome,
   to,
-  from,
   stale,
   onReset,
   evidence,
 }: {
   outcome: Outcome;
   to: string;
-  from: string;
   stale: boolean;
   onReset: () => void;
   evidence: React.ReactNode;
@@ -1359,9 +1300,16 @@ function Decision({
    * rather than swapping colour instantly under a static headline.
    */
   const p = outcome.parties;
+
+  /**
+   * The sender is still screened — the deployed policy denies
+   * payer_not_screened — but it is generated rather than chosen, so naming it
+   * in the verdict would point at an address the reader never supplied. Its
+   * datasets still count toward the regimes below, because a match there is
+   * real even if it is not the reader's doing.
+   */
   const flagged: string[] = [];
   if (p?.to?.sanctioned) flagged.push("recipient");
-  if (p?.from?.sanctioned) flagged.push("sender");
 
   const allDatasets = [...(p?.to?.datasets ?? []), ...(p?.from?.datasets ?? []), ...outcome.datasets];
   const regimes = [...new Set(allDatasets.map((d) => DATASET_REGIME[d]).filter(Boolean))];
@@ -1371,14 +1319,7 @@ function Decision({
    * the verdict — a sentence naming a party we have not identified would be a
    * guess dressed as a finding.
    */
-  const who =
-    outcome.verdict !== "block"
-      ? null
-      : flagged.length === 2
-        ? "Both parties are designated."
-        : flagged.length === 1
-          ? `The ${flagged[0]} is designated.`
-          : null;
+  const who = outcome.verdict !== "block" || flagged.length === 0 ? null : "The recipient is designated.";
 
   return (
     <>
@@ -1481,10 +1422,10 @@ function Decision({
 
         The verdict is signed by a quorum; the attribution below it is an
         unsigned lookup done here, afterwards. If the operators denied and a
-        fresh lookup finds neither party listed, something moved between the
+        fresh lookup finds the recipient unlisted, something moved between the
         two — a delisting, a feed update, a divergent oracle — and the page
-        must say so rather than print "Non Compliant" above two parties both
-        marked Clear and let the reader reconcile it.
+        must say so rather than print "Non Compliant" above a recipient marked
+        Clear and let the reader reconcile it.
       */}
       {/*
         Framed as the system working, because it is. A refusal to answer on
@@ -1499,11 +1440,11 @@ function Decision({
         </div>
       )}
 
-      {outcome.verdict === "block" && p?.to && p?.from && flagged.length === 0 && (
+      {outcome.verdict === "block" && p?.to && flagged.length === 0 && (
         <div style={{ ...small(), marginTop: SP.x2, maxWidth: "52ch", opacity: 0.75 }}>
-          The operators denied this transfer, but a lookup against the same list just now finds
-          neither party designated. The signed verdict stands — the difference is worth
-          investigating in the operator response.
+          The operators denied this transfer, but a lookup against the same list just now finds this
+          recipient undesignated. The signed verdict stands — the difference is worth investigating
+          in the operator response.
         </div>
       )}
 
@@ -1626,7 +1567,6 @@ function Decision({
         {/* No Designated/Clear tag when nothing was screened — an unscreened
             address is not a clear one. */}
         <PartyBlock name="Recipient" address={to} party={outcome.verdict === "unavailable" ? undefined : p?.to} />
-        <PartyBlock name="Sender" address={from} party={outcome.verdict === "unavailable" ? undefined : p?.from} />
 
         {/*
           "Was this address clean" is not answerable; only "was it clean

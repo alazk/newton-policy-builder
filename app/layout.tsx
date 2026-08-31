@@ -22,16 +22,15 @@ const sans = Inter({
 });
 
 /**
- * The description is stale: this stopped being a policy composer when the rule
- * toggles came out. It screens both sides of a transfer against sanctions
- * lists and returns a quorum-signed decision.
+ * What a link preview should say: one recipient, screened against the live
+ * lists, decided by a quorum before the transfer runs.
  */
 export const metadata: Metadata = {
-  title: "Newton AML/OFAC Policy Engine",
+  title: "Newton OFAC Policy Engine",
   description:
-    "Sanctions screening enforced before a transaction executes. Sender and recipient are checked against OFAC, EU, UN and UK lists, and the decision is signed by an operator quorum on Ethereum Sepolia.",
+    "Sanctions screening enforced before a transaction executes. The recipient is checked against OFAC, EU, UN and UK lists, and the decision is signed by an operator quorum on Ethereum Sepolia.",
   openGraph: {
-    title: "Newton AML/OFAC Policy Engine",
+    title: "Newton OFAC Policy Engine",
     description:
       "Sanctions screening enforced before a transaction executes, signed by an operator quorum on Ethereum Sepolia.",
     type: "website",
