@@ -323,26 +323,28 @@ a {
   .pe-console {
     grid-template-columns: minmax(0, 1fr);
   }
-  .pe-pad {
-    padding: 24px 16px !important;
-  }
-  .pe-mast {
-    padding: 16px !important;
-  }
 }
 
 /*
- * There is no longer a corner to clear.
- *
- * This reserved 324px on the right — 300px of evidence boxes plus a gutter —
- * so the verdict never ran underneath them. Those boxes are gone, and with
- * them the `.pe-corner` rules and the 1100px query that unpinned them. What
- * remains is the half of the job that was always independent of the corner:
- * stopping the measure running away on a very wide screen.
+ * The `.pe-pad` and `.pe-mast` padding overrides lived here and at 640px.
+ * They were what made the masthead 16px while the panels beneath it were 48 —
+ * two `!important` rules pulling in different directions on adjacent cards.
+ * INSET_X is a clamp, so it narrows on its own: 48 on a desktop, 4vw through
+ * the middle, 24 on a phone. One rule, no overrides, and the vertical lines
+ * hold at every width.
  */
-.pe-clear-corner {
-  max-width: 1080px;
-}
+
+/*
+ * `.pe-clear-corner` is gone.
+ *
+ * It reserved 324px on the right — 300px of evidence boxes plus a gutter — so
+ * the verdict never ran underneath them, and it capped the row at 1080. The
+ * boxes went, and then the cap became the problem: it stopped the action rule
+ * short of the panel's right edge, so the attestation button did not line up
+ * with the network badge in the masthead above it. Rows that carry something
+ * pinned right now run to the shared inset (INSET_X in lib/ds.ts), and
+ * measure is capped per element instead, where it actually matters.
+ */
 
 /*
  * Phones.
@@ -366,10 +368,6 @@ a {
   .pe-stage > * {
     overflow: visible !important;
     min-height: 0 !important;
-  }
-
-  .pe-pad {
-    padding: 16px !important;
   }
 
   .pe-console {

@@ -47,7 +47,31 @@ export const H = {
   control: 48,
   action: 72,
   radio: 24,
+
+  /**
+   * Small pills: the network badge, Cancel.
+   *
+   * These are status and escape hatches, not actions you are meant to reach
+   * for, so they sit a step below `control`. It exists as a token because the
+   * two were drawn independently — the badge at 38 (padding, not height) and
+   * Cancel at 40 — and two pills two centimetres apart being 2px different is
+   * the kind of thing you see without being able to name.
+   */
+  chip: 40,
 } as const;
+
+/**
+ * The one horizontal inset.
+ *
+ * The masthead was padded to 16, the console and screening panels to 48, and
+ * the verdict to a clamp topping out at 56 — so nothing pinned to a right
+ * edge lined up with anything above or below it. One value means two vertical
+ * lines down the page: the mark, the headings and the verdict on the left;
+ * the network badge, Cancel and the actions on the right.
+ *
+ * A clamp rather than a constant because 48 is too much of a 390px screen.
+ */
+export const INSET_X = "clamp(24px, 4vw, 48px)";
 
 /* ── Type ────────────────────────────────────────────────────
  *

@@ -34,7 +34,7 @@
 import { useEffect, useRef, useState } from "react";
 import { GOALS, PROVIDERS, SANCTIONED_TEST_ADDRESS } from "@/lib/catalog";
 import { SANCTIONED_POOL } from "@/lib/sanctioned-pool";
-import { C, H, R, SP, T, BORDER } from "@/lib/ds";
+import { C, H, R, SP, T, BORDER, INSET_X } from "@/lib/ds";
 
 /* ── Tokens ─────────────────────────────────────────────── */
 
@@ -631,9 +631,12 @@ function Masthead({ health, onHome }: { health: ScreeningHealth | null; onHome: 
         alignItems: "center",
         justifyContent: "space-between",
         gap: SP.x3,
-        // Shorter. Two elements did not need 16px of vertical air on a
-        // fixed-height console — every pixel here is one the stage loses.
-        padding: `${SP.x1_5}px ${SP.x2}px`,
+        // Shorter vertically — two elements did not need 16px of air on a
+        // fixed-height console, and every pixel here is one the stage loses.
+        // Horizontally it takes the shared inset, so the mark sits on the
+        // same line as the headings below it and the badge on the same line
+        // as Cancel and the verdict actions.
+        padding: `${SP.x1_5}px ${INSET_X}`,
         background: SURFACE,
         border: `${BORDER}px solid ${HAIRLINE}`,
         borderRadius: R_CARD,
@@ -691,9 +694,12 @@ function Masthead({ health, onHome }: { health: ScreeningHealth | null; onHome: 
           display: "flex",
           alignItems: "center",
           gap: 9,
+          // Height, not vertical padding. Padded, it came out at 38 — 2px
+          // shorter than Cancel directly beneath it, and off the 8px grid.
+          height: H.chip,
           border: `${BORDER}px solid ${stale ? FLAG : HAIRLINE}`,
           borderRadius: R_PILL,
-          padding: "8px 16px",
+          padding: `0 ${SP.x2}px`,
           background: FIELD,
         }}
       >
@@ -755,10 +761,19 @@ function Console(props: {
         overflow: "auto",
         display: "flex",
         alignItems: "center",
-        padding: `${SP.x5}px ${SP.x6}px`,
+        padding: `${SP.x5}px ${INSET_X}`,
       }}
     >
-      <div className="pe-console" style={{ width: "100%", maxWidth: 1180, margin: "0 auto" }}>
+      {/*
+        Capped but not centred.
+
+        `margin: 0 auto` put the grid in the middle of the panel, so on a wide
+        screen "Active policy" started 80-odd pixels right of the Newton mark
+        directly above it. The cap stays — a 1300px address field is not a
+        better address field — but the column now begins on the same line as
+        everything else.
+      */}
+      <div className="pe-console" style={{ width: "100%", maxWidth: 1180 }}>
         {/* 01 */}
         <div style={{ display: "flex", flexDirection: "column", gap: S2 }}>
           {/* "Active policy", because it already is. A single compulsory
@@ -1134,7 +1149,7 @@ function Screening({ to, onCancel }: { to: string; onCancel: () => void }) {
       style={{
         flex: 1,
         minHeight: 0,
-        padding: `${SP.x6}px ${SP.x6}px`,
+        padding: `${SP.x6}px ${INSET_X}`,
         display: "flex",
         flexDirection: "column",
       }}
@@ -1153,14 +1168,19 @@ function Screening({ to, onCancel }: { to: string; onCancel: () => void }) {
         />
         <span style={{ ...label(), color: INK }}>Verifying onchain</span>
 
-        {/* Eight seconds is long enough to notice a wrong address. */}
+        {/* Eight seconds is long enough to notice a wrong address.
+
+            Same height and same right edge as the network badge one card
+            above it — they are the two things pinned to the top-right of the
+            page, one after the other, so any difference between them reads as
+            a mistake. */}
         <button
           type="button"
           onClick={onCancel}
           className="pe-reset"
           style={{
             marginLeft: "auto",
-            height: SP.x5,
+            height: H.chip,
             padding: `0 ${SP.x2}px`,
             borderRadius: R_PILL,
             border: `${BORDER}px solid ${CONTROL}`,
@@ -1311,7 +1331,10 @@ function Decision({
           flex: 1,
           minHeight: 0,
           overflow: "hidden",
-          padding: "clamp(20px, 4vh, 56px) clamp(24px, 4vw, 56px)",
+          // Vertical still gives way on a short window; horizontal is the
+          // shared inset, so the actions on the rule land on the same right
+          // edge as the network badge in the masthead.
+          padding: `clamp(20px, 4vh, 56px) ${INSET_X}`,
           display: "flex",
           flexDirection: "column",
           justifyContent: "center",
@@ -1463,7 +1486,6 @@ function Decision({
         margin permanently for a string that is empty almost always.
       */}
       <div
-        className="pe-clear-corner"
         style={{
           display: "flex",
           alignItems: "center",

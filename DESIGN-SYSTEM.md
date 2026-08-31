@@ -68,12 +68,19 @@ Every value a multiple of 8, so controls sit on the layout grid.
 | Token     | px | Use                                              |
 | --------- | -- | ------------------------------------------------ |
 | `field`   | 72 | Address input                                    |
-| `control` | 48 | Secondary action (explorer link, disclosures)    |
 | `action`  | 72 | Primary action — matches the field it submits    |
+| `control` | 48 | Secondary action (New check, explorer link)      |
+| `chip`    | 40 | Status badge, Cancel                             |
 | `radio`   | 24 | Radio hit target and mark                        |
 
 `action` equals `field` on purpose: the button is as tall as the thing it acts
 on, so the two read as one unit rather than a form with a footer.
+
+`chip` sits a step below `control` because a network badge and an escape hatch
+are not things you are meant to reach for. It exists as a token because the two
+were drawn independently — the badge padded to 38, Cancel set to 40 — and two
+pills that swap places between states being 2px apart is exactly the kind of
+thing you see without being able to name.
 
 ---
 
@@ -282,13 +289,30 @@ card, so it absorbs the remainder rather than dictating the row. Any time a
 field is added or removed, that floor is the number to recheck — a floor set for
 a two-field column left a void in a one-field column.
 
-### Measure cap (`.pe-clear-corner`)
+### The horizontal inset (`INSET_X`)
 
-`max-width: 1080px`. The class is named for a job it no longer has: it used to
-reserve `calc(100% - 324px)` so the verdict never ran under the 300px evidence
-column pinned bottom-right. That column is gone. What survives is the part that
-was never about the corner — stopping the measure running away on a very wide
-screen.
+```
+clamp(24px, 4vw, 48px)
+```
+
+One value, used by the masthead and all three stage panels. Everything on the
+page therefore sits on one of two vertical lines:
+
+- **Left** — the Newton mark, "Active policy", "Screening the recipient", the
+  verdict headline, the recipient block.
+- **Right** — the Sepolia badge, Cancel, New check, the attestation link.
+
+This was three different values (masthead 16, console and screening 48, verdict
+a clamp to 56) plus two `!important` overrides at 900px and 640px, so nothing
+pinned to a right edge lined up with anything above or below it. A clamp rather
+than a constant because 48 is too much of a 390px screen; it narrows on its own
+and the overrides are gone.
+
+Two consequences worth stating: rows that carry something pinned right run to
+the inset and are not capped, and measure is capped per element instead — 46ch
+on the verdict reason, 1180 on the console grid. The console grid is capped but
+**not** centred; `margin: 0 auto` put its first column 80-odd pixels right of
+the mark directly above it.
 
 ### Outcome panel order
 
@@ -409,7 +433,10 @@ export const H = {
   control: 48,
   action: 72,
   radio: 24,
+  chip: 40,
 } as const;
+
+export const INSET_X = "clamp(24px, 4vw, 48px)";
 
 export const T = {
   label: { fontSize: 14, lineHeight: "20px", fontWeight: 500 },
@@ -516,19 +543,14 @@ body {
   gap: 24px;
 }
 
-/* Measure cap. Named for a corner that no longer exists. */
-.pe-clear-corner { max-width: 1080px; }
-
+/* Padding is INSET_X inline on every panel — no per-breakpoint overrides. */
 @media (max-width: 900px) {
   .pe-console { grid-template-columns: minmax(0, 1fr); }
-  .pe-pad { padding: 24px 16px !important; }
-  .pe-mast { padding: 16px !important; }
 }
 
 @media (max-width: 640px) {
   .pe-shell { height: auto; min-height: 100dvh; overflow: visible; }
   .pe-stage, .pe-stage > * { overflow: visible !important; min-height: 0 !important; }
-  .pe-pad { padding: 16px !important; }
   .pe-console { gap: 16px; }
   .pe-radios { flex-direction: column; gap: 12px !important; }
   .pe-parties { flex-direction: column; align-items: flex-start !important; gap: 16px !important; }
