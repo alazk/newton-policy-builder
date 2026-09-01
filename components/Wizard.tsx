@@ -257,12 +257,15 @@ export default function Wizard() {
   /*
    * There is no sender state, and no sender field.
    *
-   * The deployed policy still screens both parties — it denies
-   * `payer_not_screened` when one is missing — so a run has to carry a sender
-   * whether or not the page asks for one. verify() generates fresh random 20
-   * bytes for it: on no list, so it can only ever be the clean half, and the
-   * recipient stays the single variable. Nothing to render, so nothing to
-   * hold in state.
+   * A transaction still has a sender — verify() generates fresh random 20
+   * bytes — but the deployed policy no longer screens it. The payer rules were
+   * removed in the redeploy that fixed the confidence gate, precisely because
+   * this page had stopped asking for a sender: `payer_sanctioned` could never
+   * fire against a generated address, while `payer_not_screened` and
+   * `payer_address_mismatch` could still fire spuriously and deny a clean
+   * recipient for a reason having nothing to do with the recipient.
+   *
+   * See sanctions-oracle/yente-policy-files/policy.rego.
    */
 
   /**
@@ -351,10 +354,9 @@ export default function Wizard() {
     /**
      * A fresh sender every run.
      *
-     * The policy requires one — `payer_not_screened` denies when a party is
-     * missing — so the transfer always carries a sender even though the page
-     * no longer asks for one. Random 20 bytes is on no list, which keeps the
-     * recipient the only thing under test.
+     * Not for the policy — that no longer screens the payer. For the intent:
+     * every transaction has a `from`, and the oracle refuses a request without
+     * one. Random 20 bytes keeps the recipient the only thing under test.
      */
     const sendTo = to;
     const sendFrom = randomOrdinary();
@@ -863,10 +865,10 @@ function Console(props: {
 
           {/*
             One field, because there is one question: is this address on a
-            list. The sender is still screened — the deployed policy denies
-            payer_not_screened — but it is generated, not asked for, so the
-            screen does not make the visitor invent a second address they
-            have no opinion about.
+            list. The deployed policy screens the recipient and nothing else —
+            the payer rules were removed once this page stopped asking for a
+            sender, rather than left in to be satisfied by an address the
+            visitor never chose.
           */}
           <Field
             name="Recipient"
@@ -1285,16 +1287,18 @@ function Decision({
   const p = outcome.parties;
 
   /**
-   * The sender is still screened — the deployed policy denies
-   * payer_not_screened — but it is generated rather than chosen, so naming it
-   * in the verdict would point at an address the reader never supplied. Its
-   * datasets still count toward the regimes below, because a match there is
-   * real even if it is not the reader's doing.
+   * Recipient only, which is now the whole policy.
+   *
+   * /api/screen still attributes both sides, because it queries the same feed
+   * per address and the sender is in the intent. But the deployed policy no
+   * longer consults the payer, so a sender dataset here could not have
+   * contributed to the verdict — listing it under "Listed on" would attribute
+   * a denial to a match that did not cause it.
    */
   const flagged: string[] = [];
   if (p?.to?.sanctioned) flagged.push("recipient");
 
-  const allDatasets = [...(p?.to?.datasets ?? []), ...(p?.from?.datasets ?? []), ...outcome.datasets];
+  const allDatasets = [...(p?.to?.datasets ?? []), ...outcome.datasets];
   const regimes = [...new Set(allDatasets.map((d) => DATASET_REGIME[d]).filter(Boolean))];
 
   /**

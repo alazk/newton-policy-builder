@@ -101,9 +101,10 @@ export async function POST(req: NextRequest) {
 
   const chainIdHex = toQuantity(CHAIN_ID);
 
-  // The payer is screened too, so it has to be a real address in both the
-  // intent and the oracle args — and the SAME one, or the policy's
-  // payer_address_mismatch rule fires.
+  // The policy no longer screens the payer, but the intent still needs one —
+  // every transaction has a sender, and the oracle refuses a request without
+  // it. Kept identical in the intent and the oracle args so the two describe
+  // the same transfer.
   const sender = from || DEMO_POLICY_CLIENT;
 
   const rpcParams = {

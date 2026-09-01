@@ -4,10 +4,16 @@ Enter a recipient. It is screened against a consolidated sanctions feed (US,
 EU, UN, UK and others) and an operator quorum signs the decision on Ethereum
 Sepolia **before** the transfer would execute.
 
-The policy screens both parties — it denies `payer_not_screened` when one is
-missing — so every run also carries a sender. That sender is freshly generated
-random bytes rather than a second field: random is on no list, so it can only
-ever be the clean half, and the recipient stays the only variable.
+The recipient is the only thing screened. Every run still carries a sender —
+transactions have one, and the oracle requires it — but it is freshly generated
+random bytes and the policy does not consult the answer.
+
+The payer rules were removed in the same redeploy that fixed the confidence
+gate. In a real AML programme you screen the originator too; here the page had
+stopped asking for a sender, so `payer_sanctioned` could never fire
+legitimately while `payer_not_screened` could still fire spuriously and deny a
+clean recipient for an unrelated reason. See
+`sanctions-oracle/yente-policy-files/policy.rego`.
 
 The verdict on screen comes from a real `newt_createTask` — not a simulation.
 It has an attestation you can open in the Newton explorer.
@@ -55,11 +61,10 @@ UI ──▶ /api/evaluate ──▶ newt_createTask ──▶ operator quorum
                                     bytes32 evaluation_result
 ```
 
-The oracle screens **both** parties in one lookup and the deployed Rego denies
-on any of nine rules — including `payer_sanctioned`, which is why the sender is
-a field and not a constant.
+The oracle screens both parties in one lookup; the deployed Rego reads only the
+recipient's half and denies on five rules.
 
-### Three things this codebase learned the hard way
+### Four things this codebase learned the hard way
 
 1. **Every failure presents as a denial.** A broken oracle, a wrong data path
    and a correct sanctions block are indistinguishable if you only ever test an
@@ -73,9 +78,18 @@ a field and not a constant.
    as Compliant while the explorer showed the real denial. See `extractAllow`.
 
 3. **The composed policy is not the enforced policy.** In submit mode the
-   operators evaluate the `policyCid` bound on-chain. The "Deployed policy"
-   panel resolves that from the chain (`getPolicyCid` → IPFS) and deliberately
-   does *not* fall back to locally generated Rego.
+   operators evaluate the `policyCid` bound on-chain. `node policy/check.mjs`
+   resolves that from the chain (`getPolicyCid` → IPFS) and diffs it against
+   `../sanctions-oracle/yente-policy-files/policy.rego`, which is the one copy
+   of the source.
+
+4. **Test on Regorus, not on OPA.** Regorus is a documented OPA *subset* and
+   diverges exactly where this policy lives — undefined handling. `lower(null)`
+   is undefined in OPA and rego-cpp; in Regorus it is a fatal error that aborts
+   evaluation, so for one deploy the policy *crashed* rather than denying
+   whenever the oracle failed — making `screening_unavailable` unreachable
+   precisely when it was needed. Found by `newton-cli policy simulate`. A green
+   test on any other engine proves nothing.
 
 ---
 
@@ -86,7 +100,8 @@ a field and not a constant.
 | Screening API down | `screening_unavailable` → denied |
 | Screening data > 48h old | API returns 503 → `screening_unavailable` → denied |
 | Verdict unreadable | UI shows **No decision**; transfer stays blocked |
-| Either party unscreened | `payee_not_screened` / `payer_not_screened` → denied |
+| Recipient unscreened | `payee_not_screened` → denied |
+| Oracle returns a null address | `payee_address_mismatch` → denied |
 
 Stale data returning a confident ALLOW was the last fail-open, and it is closed
 in the screening API rather than in the UI — the badge and the watchdog make
