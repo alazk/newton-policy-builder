@@ -1,34 +1,99 @@
 # Deploying the corrected policy
 
-## Currently deployed
+## What the site is running RIGHT NOW
+
+**The denylist policy, not the yente one.** This is a fallback, and the reason
+is two Newton-side failures, neither of them in this repo.
 
 ```
-client        0x749753713fC04bbDB5dAf9C66cdE293512fe0eE7   (unchanged)
-policy        0x3286Ab6cD3EEE550f851fc584e4F4d99f0269fea
+client        0xfd054556b4d00d8b0f897b1ae377ecd17fccae78   (POLICY_CLIENT_DENYLIST)
+policy        0x627222E71CCEc59C315c83C095f12458FaB5B221
+cid           bafkreigvmehmguzwvy3wla2q56jk25jpfog3ecuym5v6cquoeocjodhqri  (pinned August)
+policyId      0x1c2dc88bc29969af36f7e2dccd235883453ef1aedc3df64e027b70fd6c8a70e5
+entrypoint    newton_sanctions.allow
+params        24 addresses from lib/sanctioned-pool.ts, 1106 bytes
+expireAfter   300
+```
+
+Params-only: no WASM, no oracle, no IPFS fetch at evaluation time. Verified end
+to end on the live site — a clean address ALLOWED, `0x175d4445…` DENIED, both
+quorum-signed.
+
+It screens a **fixed list of 24 addresses**. It is not live screening and
+cannot catch a designation made today. `lib/catalog.ts` and the UI copy say so;
+keep it that way while this is bound.
+
+To change the list: `node policy/setparams.mjs --confirm`. One transaction, no
+IPFS.
+
+---
+
+## The yente policy: deployed, correct, unreachable
+
+```
+policy        0xDDD3AC3ceE21a096407E3D9c921908dB1fb743D2
 cid           bafkreiciv3qsjccb5wjsqzhsgkquhw2vmcxjnwnj6cp3gjkukd7sr42cai
-policyId      0x670d394d59447fced6ee02e31e3ccd874d1ea0649217ed1a292c1132c11def3a
 codeHash      0xa2532ab470713e4d120c8731e1efe0a450346741795e63d286a8b5a7069f4143
-entrypoint    newton_yente.allow           (unchanged)
-params        {"blocked_datasets":[]}      (unchanged, byte for byte)
-expireAfter   300                          (unchanged)
+policyData    (new, from the rebuilt wasm — see the deploy output)
+wasmCid       bafybeidjruvdj4q7bhh6hh3agas7czqg6gyshd25qtqgq2eqjzbnjcq4te
 ```
 
-Carried three changes: the confidence gate inverted so an absent `match_score`
-denies, `is_string()` guards so `lower(null)` cannot abort evaluation, and the
-payer rules removed. Verified on Regorus before deploying — broken oracle
-denies, clean allows, sanctioned denies.
+Four fixes, all verified on Regorus via `newton-cli policy simulate`:
 
-**Previous, for rollback:**
+1. **`tlsn` removed from the WIT world.** `yente.js` imports only
+   `newton:provider/http@0.2.0` but the world declared `secrets` and `tlsn`
+   too. A component must have every declared import satisfied whether or not
+   it calls them, so when Newton's runtime stopped serving `tlsn@0.2.0` every
+   task died on an interface the oracle never uses.
+2. **`is_string()` guards.** `lower(null)` is a fatal error in Regorus, not
+   undefined — so when the oracle returned `address: null`, the policy
+   *crashed* instead of denying, making `screening_unavailable` unreachable
+   exactly when the oracle was broken.
+3. **Confidence gate inverted**, so a confirmed hit with an absent
+   `match_score` denies rather than being allowed with an empty deny set.
+4. **Payer rules removed**, since the UI generates the sender.
+
+### Why it is not bound
+
+Operators report:
+
+```
+Network error: object bafkreiciv3qsjcc… not found in persisted immutable
+data backend
+```
+
+That CID is retrievable from `ipfs.io` and `gateway.pinata.cloud` — confirmed
+with eight consecutive 200s. So their store is not public IPFS, and content
+pinned today does not reach it. CIDs pinned in August do. `deploy/1-upload.mjs`
+notes that `cli.newton.xyz` is dead; if that service was what ingested content
+into the operator backend, nothing deployed since can be read.
+
+### Restoring it
+
+When Newton fixes either issue:
+
+```bash
+node policy/bind.mjs 0xDDD3AC3ceE21a096407E3D9c921908dB1fb743D2 --confirm
+```
+
+Then in `lib/catalog.ts` set `providers: ["yente"]`, and put the live-feed
+language back in the card blurb, the screening step, the "No match on" chips
+and `app/layout.tsx`. Each is marked in place.
+
+**Bind only after checking the CID from a gateway you do not control.** Pinata
+answering proves your pin exists, nothing more. That check existed in this file
+before the first attempt and was skipped, which is why the first deploy left
+the demo returning "No decision" for an hour.
+
+### Older yente policy, before these fixes
 
 ```
 policy   0xf5c9D9eddCb85395e4D53db309AE3E915ad3897D
 cid      bafkreibr4ruqxldeolxwelet7wc6ki7vm7a2ykk7fgxe6fitzphqmcacea
-
-node policy/bind.mjs 0xf5c9D9eddCb85395e4D53db309AE3E915ad3897D --confirm
 ```
 
-The old Policy is untouched and still holds its config, so rollback is two
-calls and no re-pin.
+Readable by operators, but its PolicyData holds the wasm with the `tlsn`
+import, so it fails to instantiate. Not a working fallback.
 
 **Two things moved that you did not ask to move.** `newton-cli` deployed
 through its own factory (`0xdfd5ac2D…`, newer than the old `0xe37952D9…` — the

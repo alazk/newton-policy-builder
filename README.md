@@ -1,22 +1,35 @@
 # Newton Sanctions Policy Engine
 
-Enter a recipient. It is screened against a consolidated sanctions feed (US,
-EU, UN, UK and others) and an operator quorum signs the decision on Ethereum
-Sepolia **before** the transfer would execute.
-
-The recipient is the only thing screened. Every run still carries a sender —
-transactions have one, and the oracle requires it — but it is freshly generated
-random bytes and the policy does not consult the answer.
-
-The payer rules were removed in the same redeploy that fixed the confidence
-gate. In a real AML programme you screen the originator too; here the page had
-stopped asking for a sender, so `payer_sanctioned` could never fire
-legitimately while `payer_not_screened` could still fire spuriously and deny a
-clean recipient for an unrelated reason. See
-`sanctions-oracle/yente-policy-files/policy.rego`.
+Enter a recipient. It is screened against a sanctions list and an operator
+quorum signs the decision on Ethereum Sepolia **before** the transfer would
+execute.
 
 The verdict on screen comes from a real `newt_createTask` — not a simulation.
 It has an attestation you can open in the Newton explorer.
+
+> ### Running on the fallback policy
+>
+> The site currently screens a **fixed list of 24 addresses** held on chain, not
+> a live consolidated feed. It cannot catch a designation made today.
+>
+> The oracle-backed policy is written, fixed, deployed and verified — it just
+> cannot be reached. Two Newton-side failures:
+>
+> 1. Their runtime stopped providing `newton:provider/tlsn@0.2.0`, so any
+>    component built against `newton:provider@0.2.0` fails to instantiate.
+> 2. A policy CID pinned today reports `not found in persisted immutable data
+>    backend` even though it serves from `ipfs.io` and Pinata. CIDs pinned in
+>    August resolve. So no newly deployed policy can be read at all.
+>
+> `policy/DEPLOY.md` has the addresses, the evidence, and the one command to
+> switch back.
+
+The recipient is the only thing screened. Every run still carries a sender —
+transactions have one — but it is freshly generated random bytes and the
+policy does not consult the answer. The payer rules were removed once the page
+stopped asking for a sender: `payer_sanctioned` could never fire legitimately
+against a generated address, while `payer_not_screened` could still fire
+spuriously and deny a clean recipient for an unrelated reason.
 
 ---
 
@@ -61,10 +74,12 @@ UI ──▶ /api/evaluate ──▶ newt_createTask ──▶ operator quorum
                                     bytes32 evaluation_result
 ```
 
-The oracle screens both parties in one lookup; the deployed Rego reads only the
-recipient's half and denies on five rules.
+That is the oracle-backed path, and it is the one currently bypassed. The
+denylist policy in force has no WASM leg at all: the address list arrives as
+`data.params.sanctioned_addresses`, set on the PolicyClient, so a check is
+`newt_createTask` → quorum → verdict with nothing fetched at evaluation time.
 
-### Four things this codebase learned the hard way
+### Five things this codebase learned the hard way
 
 1. **Every failure presents as a denial.** A broken oracle, a wrong data path
    and a correct sanctions block are indistinguishable if you only ever test an
@@ -91,15 +106,41 @@ recipient's half and denies on five rules.
    precisely when it was needed. Found by `newton-cli policy simulate`. A green
    test on any other engine proves nothing.
 
+5. **An unused import is still an import.** `yente.js` calls one interface,
+   `newton:provider/http@0.2.0`. The WIT world declared `secrets` and `tlsn`
+   as well. A component must have every declared import satisfied at
+   instantiation whether or not it ever calls them — so when Newton's runtime
+   stopped serving `tlsn@0.2.0`, every task died on an interface the oracle
+   does not use. Declare what you call.
+
+   The corollary, which cost more: **you do not control the runtime you deploy
+   into.** A pinned package version stopped meaning a fixed surface, and there
+   was no local test that could have caught it, because the break was on the
+   other side. `deploy/1-upload.mjs` already carried a note that
+   `cli.newton.xyz` was dead. Read those notes as a pattern, not as history.
+
 ---
 
 ## Fail-closed behaviour
+
+**Denylist policy (in force):**
+
+| Condition | Result |
+| --- | --- |
+| Address list empty or expired | `denylist_not_configured` → denied |
+| Verdict unreadable | UI shows **No decision**; transfer stays blocked |
+| Operators cannot fetch the policy | task errors → **No decision**, never a verdict |
+
+An empty list matches nobody, so without that first rule an unconfigured policy
+would approve everything while looking like it worked. An empty sanctions list
+is not evidence that an address is clean.
+
+**Oracle policy (parked):**
 
 | Condition | Result |
 | --- | --- |
 | Screening API down | `screening_unavailable` → denied |
 | Screening data > 48h old | API returns 503 → `screening_unavailable` → denied |
-| Verdict unreadable | UI shows **No decision**; transfer stays blocked |
 | Recipient unscreened | `payee_not_screened` → denied |
 | Oracle returns a null address | `payee_address_mismatch` → denied |
 
@@ -138,7 +179,8 @@ reads. One copy, in the directory that deploys it.
 | | |
 | --- | --- |
 | `check.mjs` | Reads Sepolia directly — current CID, config, `policyCodeHash`, and a diff of chain against the source. `--after` compares to the snapshot and says whether a deploy landed. No dev server, no pip. |
-| `bind.mjs` | Points the PolicyClient at a new Policy, carrying `policyParams` across as raw bytes. Dry run unless `--confirm`. Detects and resumes a half-finished bind. |
+| `bind.mjs` | Points the PolicyClient at a new Policy, carrying `policyParams` across as raw bytes read from chain. Dry run unless `--confirm`. Detects and resumes a half-finished bind. |
+| `setparams.mjs` | Loads `lib/sanctioned-pool.ts` into the denylist client's params. One transaction, no IPFS. This is what the live site screens against. |
 | `simargs.mjs` | Builds the intent and wasm-args JSON for `newton-cli policy simulate`, and prints the command. |
 | `gate_test.py` | Six inputs through the old and new confidence gate. `pip install regopy`. |
 | `DEPLOY.md` | What is currently deployed, how to replace it, how to roll back. |
@@ -186,11 +228,15 @@ see `policy/DEPLOY.md`.
 
 ## Known gaps
 
-- **`YENTE_URL` points at a tunnel to a laptop.** Close the lid and every check
-  on the deployed site returns `screening_unavailable` — correctly, fail-closed,
-  and indistinguishable to a visitor from the site being broken. This is the
-  single biggest thing between the demo and being genuinely deployed. yente
-  needs Elasticsearch and a periodic dataset load, so it is not a drop-in.
+- **The site is on the fallback policy** and screens 24 fixed addresses, not a
+  live feed. See the box at the top and `policy/DEPLOY.md`. Both causes are
+  Newton-side and neither is fixable from here.
+- **`YENTE_URL` points at a Cloudflare *quick* tunnel** — random hostname, dies
+  with the process, tied to a laptop being awake. Even with the oracle path
+  restored, close the lid and every check returns `screening_unavailable`:
+  correct, fail-closed, and indistinguishable to a visitor from the site being
+  broken. A named tunnel would at least survive a restart. yente itself needs
+  Elasticsearch and a periodic dataset load, so it is not a drop-in either.
 - **The stale-data path has never been exercised.** Set `MAX_AGE_HOURS = 0` in
   `sanctions-api` to force it. The grey `unavailable` verdict has never been
   seen against a genuinely stale feed.
