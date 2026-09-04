@@ -835,12 +835,13 @@ function Console(props: {
               </span>
             </div>
 
-            {/* "Either party" was accurate when the page had two fields. It
-                still screens both — the sender is generated — but the card
-                should describe what you can change. */}
+            {/* Says "list", not "feed", while the denylist policy is bound.
+                The screening is a fixed on-chain set of addresses right now,
+                not a live consolidated lookup, and a card claiming otherwise
+                would be the one kind of wrong this whole project is about. */}
             <div style={{ ...T.value, fontFamily: SANS, color: BODY, marginTop: SP.x2, maxWidth: "46ch" }}>
-              Blocks the transfer if the recipient is sanctioned. Enforced by an operator quorum
-              before it executes.
+              Blocks the transfer if the recipient is on the sanctions list. Enforced by an operator
+              quorum before it executes.
             </div>
 
             <div style={{ marginTop: "auto", paddingTop: SP.x3, ...label(), color: applied ? INK : FLAG }}>
@@ -1028,7 +1029,7 @@ function Pickers({
     {
       value: "ofac",
       text: "Sanctioned address",
-      hint: `A real designated wallet from the live sanctions feed`,
+      hint: `A real OFAC-designated wallet, present in the deployed list`,
     },
   ];
 
@@ -1235,7 +1236,7 @@ function Screening({ to, onCancel }: { to: string; onCancel: () => void }) {
           Task submitted to the Newton gateway
         </Step>
         <Step n={2}>
-          Screened against the consolidated sanctions list in a single lookup
+          Screened against the sanctions list bound to the policy on chain
         </Step>
         <Step n={3}>Operator quorum evaluates the policy and signs the result</Step>
       </div>
@@ -1434,25 +1435,18 @@ function Decision({
         </div>
       )}
 
-      {outcome.verdict === "pass" && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: SP.x1, marginTop: SP.x3, alignItems: "center" }}>
-          <span style={{ ...small(), color: "rgba(27,27,27,0.6)" }}>No match on</span>
-          {REGIMES.map((r) => (
-            <span
-              key={r}
-              style={{
-                borderRadius: R_PILL,
-                border: `${BORDER}px solid rgba(27,27,27,0.22)`,
-                padding: `${SP.x1}px ${SP.x2}px`,
-                ...label(),
-                color: "rgba(27,27,27,0.7)",
-              }}
-            >
-              {r}
-            </span>
-          ))}
-        </div>
-      )}
+      {/*
+        The "No match on US · EU · UN · UK" chips were here.
+
+        They were true while the oracle queried a consolidated feed. With the
+        denylist policy bound, one list is checked and naming four regimes
+        would be a claim the verdict cannot support — the same defect as the
+        per-list theatre these chips replaced, just pointing the other way.
+        The reason line above already says the recipient is not designated,
+        which is exactly as much as is known.
+
+        Restore these with the yente policy.
+      */}
 
       {/* Rule names, when the policy returns them — the actual reason. */}
       {outcome.denies.length > 0 && (

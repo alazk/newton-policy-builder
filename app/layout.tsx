@@ -28,7 +28,7 @@ const sans = Inter({
 export const metadata: Metadata = {
   title: "Newton Sanctions Policy Engine",
   description:
-    "Sanctions screening enforced before a transaction executes. The recipient is checked against a consolidated US, EU, UN and UK feed, and the decision is signed by an operator quorum on Ethereum Sepolia.",
+    "Sanctions screening enforced before a transaction executes. The recipient is checked against a sanctions list bound to the policy on chain, and the decision is signed by an operator quorum on Ethereum Sepolia.",
   openGraph: {
     title: "Newton Sanctions Policy Engine",
     description:

@@ -183,12 +183,30 @@ export const GOALS: Record<string, Goal> = {
     name: "Newton Sanctions Policy Engine",
     blurb:
       "Block payments to or from sanctioned addresses, enforced on-chain by an operator quorum before the transaction executes.",
-    // OpenSanctions only. The params-only denylist still works and is still
-    // defined below, but offering it as a choice asked the user to make a
-    // decision they have no basis for — and the static list covers 93 of the
-    // ~960 OFAC-designated wallets the live feed carries, so picking it is
-    // strictly worse. Add "local-denylist" back here to restore the toggle.
-    providers: ["yente"],
+    /*
+     * FALLBACK. This should be ["yente"] and is not, for two reasons that are
+     * both Newton's infrastructure rather than this code:
+     *
+     *   1. Their runtime stopped providing `newton:provider/tlsn@0.2.0`, so
+     *      the oracle component fails to instantiate. Fixed locally — the
+     *      import was declared and never used — but shipping the fix needs a
+     *      redeploy, which hits:
+     *
+     *   2. A policy CID pinned today reports `not found in persisted
+     *      immutable data backend` even though it is fetchable from ipfs.io
+     *      and Pinata. CIDs pinned in August resolve. So no newly deployed
+     *      policy can be read by the operators at all.
+     *
+     * Between them there is no working oracle-backed configuration. The
+     * denylist has neither problem: its CID predates the breakage and is in
+     * the operator backend (verified with a real quorum-signed task), and it
+     * has no WASM, so there is no component and no tlsn.
+     *
+     * TO REVERT, once Newton fixes either one: change this back to ["yente"],
+     * rebind the client to the yente policy, and put the live-feed language
+     * back in the card blurb below and in app/layout.tsx.
+     */
+    providers: ["local-denylist"],
     rules: [
       "payee_not_on_denylist",
       "payer_not_on_denylist",

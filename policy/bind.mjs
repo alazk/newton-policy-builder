@@ -45,7 +45,6 @@ import { sepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const SNAPSHOT = "/tmp/policy-before.json";
 
 const RED = (s) => `\x1b[31m${s}\x1b[0m`;
 const B = (s) => `\x1b[1m${s}\x1b[0m`;
@@ -69,13 +68,6 @@ if (!NEW_POLICY || !isAddress(NEW_POLICY)) {
   process.exit(1);
 }
 
-if (!existsSync(SNAPSHOT)) {
-  console.error(`No ${SNAPSHOT}. Run \`node policy/check.mjs\` first —`);
-  console.error("the config to carry across is read from it, not retyped.");
-  process.exit(1);
-}
-
-const before = JSON.parse(readFileSync(SNAPSHOT, "utf8"));
 const CLIENT = E.POLICY_CLIENT_YENTE || E.POLICY_CLIENT;
 const OWNER_KEY = E.OWNER_PRIVATE_KEY;
 
@@ -87,18 +79,6 @@ if (!OWNER_KEY) {
   console.error("OWNER_PRIVATE_KEY is not set. It is the PolicyClient's owner key,");
   console.error("not the deployer's — both calls here are onlyPolicyClientOwner.");
   console.error("  set -a; source ../deploy/.env; set +a");
-  process.exit(1);
-}
-
-if (!before.paramsHex) {
-  console.error(RED("The snapshot has no raw policyParams."));
-  console.error("Re-run `node policy/check.mjs` with the current script — an older");
-  console.error("version stored only the parsed object, and re-encoding it would");
-  console.error("change the policyId.");
-  process.exit(1);
-}
-if (!before.expireAfter) {
-  console.error(RED("The snapshot has no expireAfter. Refusing to guess."));
   process.exit(1);
 }
 
@@ -120,6 +100,13 @@ const ABI = [
     inputs: [], outputs: [{ type: "bytes32" }] },
   { type: "function", name: "getOwner", stateMutability: "view",
     inputs: [], outputs: [{ type: "address" }] },
+  // On the POLICY. Reads back the exact bytes currently in force.
+  { type: "function", name: "getPolicyConfig", stateMutability: "view",
+    inputs: [{ name: "policyId", type: "bytes32" }],
+    outputs: [{ type: "tuple", components: [
+      { name: "policyParams", type: "bytes" },
+      { name: "expireAfter", type: "uint32" },
+    ] }] },
 ];
 
 const rpc = E.SEPOLIA_RPC_URL || E.RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com";
@@ -137,15 +124,45 @@ const [owner, currentPolicy, currentId, balance] = await Promise.all([
   pub.getBalance({ address: account.address }),
 ]);
 
+/**
+ * The config comes from the chain, not from a file in /tmp.
+ *
+ * This used to require the snapshot `check.mjs` writes. Then a reboot cleared
+ * /tmp and the ROLLBACK refused to run — a recovery tool failing because a
+ * scratch file went missing, at the exact moment you need it. The bytes in
+ * force are readable from the contract that holds them, so read them there.
+ */
+const cfg = await pub
+  .readContract({
+    address: currentPolicy, abi: ABI, functionName: "getPolicyConfig", args: [currentId],
+  })
+  .catch(() => null);
+
+const paramsHex = cfg?.policyParams ?? cfg?.[0] ?? null;
+const expireAfter = Number(cfg?.expireAfter ?? cfg?.[1] ?? 0) || null;
+
+if (!paramsHex || paramsHex === "0x" || !expireAfter) {
+  console.error(RED("\nCould not read the live policy config. Refusing to guess."));
+  console.error(`  policy ${currentPolicy}  policyId ${currentId}`);
+  process.exit(1);
+}
+
+let paramsText = "(not UTF-8 JSON)";
+try {
+  paramsText = Buffer.from(paramsHex.slice(2), "hex").toString("utf8");
+} catch {
+  /* shown as-is */
+}
+
 console.log(`\n${B("Rebinding")}`);
 console.log(`  client        ${CLIENT}`);
 console.log(`  from policy   ${currentPolicy}`);
 console.log(`  to policy     ${NEW_POLICY}`);
 console.log(`  policyId now  ${currentId}`);
-console.log(`\n${B("Config carried across, byte for byte")}`);
-console.log(`  policyParams  ${before.paramsHex}`);
-console.log(`                ${JSON.stringify(before.params)}`);
-console.log(`  expireAfter   ${before.expireAfter}`);
+console.log(`\n${B("Config read from chain, carried across byte for byte")}`);
+console.log(`  policyParams  ${paramsHex}`);
+console.log(`                ${paramsText}`);
+console.log(`  expireAfter   ${expireAfter}`);
 console.log(`\n${B("Signer")}`);
 console.log(`  address       ${account.address}`);
 console.log(`  client owner  ${owner}`);
@@ -220,7 +237,7 @@ if (!addressBound) {
 console.log(`\n${B("setPolicy")}  (2 of 2 — do not interrupt)`);
 const h2 = await wallet.writeContract({
   address: CLIENT, abi: ABI, functionName: "setPolicy",
-  args: [{ policyParams: before.paramsHex, expireAfter: before.expireAfter }],
+  args: [{ policyParams: paramsHex, expireAfter }],
 });
 console.log(`  https://sepolia.etherscan.io/tx/${h2}`);
 const r2 = await pub.waitForTransactionReceipt({ hash: h2 });
