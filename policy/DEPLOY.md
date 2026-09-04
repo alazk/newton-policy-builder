@@ -9,22 +9,32 @@ is two Newton-side failures, neither of them in this repo.
 client        0xfd054556b4d00d8b0f897b1ae377ecd17fccae78   (POLICY_CLIENT_DENYLIST)
 policy        0x627222E71CCEc59C315c83C095f12458FaB5B221
 cid           bafkreigvmehmguzwvy3wla2q56jk25jpfog3ecuym5v6cquoeocjodhqri  (pinned August)
-policyId      0x1c2dc88bc29969af36f7e2dccd235883453ef1aedc3df64e027b70fd6c8a70e5
+policyId      0x120a4c18c77638c869571e5f10e42e76d2b314ab664e23ddb724224bf393290c
 entrypoint    newton_sanctions.allow
-params        24 addresses from lib/sanctioned-pool.ts, 1106 bytes
+params        97 addresses (pool ∪ OFAC list), 4391 bytes
 expireAfter   300
 ```
 
 Params-only: no WASM, no oracle, no IPFS fetch at evaluation time. Verified end
-to end on the live site — a clean address ALLOWED, `0x175d4445…` DENIED, both
+to end on the live site — a clean address ALLOWED, and `0x7F367cC4…` (from the
+OFAC-only portion, so it also proves the new entries took) DENIED. Both
 quorum-signed.
 
-It screens a **fixed list of 24 addresses**. It is not live screening and
-cannot catch a designation made today. `lib/catalog.ts` and the UI copy say so;
-keep it that way while this is bound.
+It screens a **fixed list of 97 addresses, OFAC only**. Not live screening, no
+EU/UN/UK coverage, and it cannot catch a designation made today. `lib/catalog.ts`
+and the UI copy say so; keep it that way while this is bound.
 
 To change the list: `node policy/setparams.mjs --confirm`. One transaction, no
-IPFS.
+IPFS. Always re-test a **clean** address afterwards — if a params write fails,
+`denylist_not_configured` fires and everything denies, which is indistinguishable
+from screening working.
+
+**A note on payload size.** `deploy/10-shrink-params.mjs` cut this list from 93
+addresses to 3 while debugging, leaving a standing belief that ~4KB of params
+had broken something. It had not — 4391 bytes wrote fine. That script changed
+`expireAfter` in the same transaction, so the two hypotheses were never
+separated, and the list stayed small for months on the strength of the wrong
+one.
 
 ---
 

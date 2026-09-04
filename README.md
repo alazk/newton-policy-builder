@@ -9,8 +9,9 @@ It has an attestation you can open in the Newton explorer.
 
 > ### Running on the fallback policy
 >
-> The site currently screens a **fixed list of 24 addresses** held on chain, not
-> a live consolidated feed. It cannot catch a designation made today.
+> The site currently screens a **fixed list of 97 OFAC addresses** held on
+> chain, not a live consolidated feed. No EU, UN or UK coverage, and it cannot
+> catch a designation made today.
 >
 > The oracle-backed policy is written, fixed, deployed and verified — it just
 > cannot be reached. Two Newton-side failures:
@@ -180,7 +181,7 @@ reads. One copy, in the directory that deploys it.
 | --- | --- |
 | `check.mjs` | Reads Sepolia directly — current CID, config, `policyCodeHash`, and a diff of chain against the source. `--after` compares to the snapshot and says whether a deploy landed. No dev server, no pip. |
 | `bind.mjs` | Points the PolicyClient at a new Policy, carrying `policyParams` across as raw bytes read from chain. Dry run unless `--confirm`. Detects and resumes a half-finished bind. |
-| `setparams.mjs` | Loads `lib/sanctioned-pool.ts` into the denylist client's params. One transaction, no IPFS. This is what the live site screens against. |
+| `setparams.mjs` | Loads `lib/sanctioned-pool.ts` ∪ `lib/ofac-addresses.ts` into the denylist client's params. One transaction, no IPFS. This is what the live site screens against. |
 | `simargs.mjs` | Builds the intent and wasm-args JSON for `newton-cli policy simulate`, and prints the command. |
 | `gate_test.py` | Six inputs through the old and new confidence gate. `pip install regopy`. |
 | `DEPLOY.md` | What is currently deployed, how to replace it, how to roll back. |
@@ -228,9 +229,9 @@ see `policy/DEPLOY.md`.
 
 ## Known gaps
 
-- **The site is on the fallback policy** and screens 24 fixed addresses, not a
-  live feed. See the box at the top and `policy/DEPLOY.md`. Both causes are
-  Newton-side and neither is fixable from here.
+- **The site is on the fallback policy** and screens 97 fixed OFAC addresses,
+  not a live multi-regime feed. See the box at the top and `policy/DEPLOY.md`.
+  Both causes are Newton-side and neither is fixable from here.
 - **`YENTE_URL` points at a Cloudflare *quick* tunnel** — random hostname, dies
   with the process, tied to a laptop being awake. Even with the oracle path
   restored, close the lid and every check returns `screening_unavailable`:

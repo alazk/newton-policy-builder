@@ -22,20 +22,25 @@
  *
  * WHAT YOU GIVE UP, STATED PLAINLY
  *
- * This is a static snapshot of N addresses, not live multi-regime screening.
- * It cannot catch a designation made this morning. Anything the demo says
- * about a "consolidated live feed" stops being true while this is bound, and
- * the UI copy must say so — a screen that claims live screening while reading
- * a frozen list is the exact category of lie this project exists to avoid.
+ * A static snapshot — currently 97 addresses — not live multi-regime
+ * screening. It cannot catch a designation made this morning, and it covers
+ * OFAC only: the EU, UN and UK entries the yente feed carries are absent.
+ * Anything the demo says about a "consolidated live feed" stops being true
+ * while this is bound, and the UI copy must say so. A screen claiming live
+ * screening while reading a frozen list is the exact category of lie this
+ * project exists to avoid.
  *
- * WHY THE POOL AND NOT THE FULL OFAC LIST
+ * ON PAYLOAD SIZE
  *
  * `deploy/10-shrink-params.mjs` cut this list from 93 addresses to 3 while
- * debugging a failure — "~4KB → ~0.2KB" — so a large payload is suspected of
- * having broken something before. The pool is 24 addresses (~1KB), which is
- * what the UI's "Sanctioned address" button actually offers, so every address
- * a visitor can reach with one click is covered. --limit exists to bisect if
- * even that is refused.
+ * debugging a failure — "~4KB → ~0.2KB" — which left a standing belief that a
+ * large payload had broken something. It had not. 97 addresses at 4391 bytes
+ * were written and verified in one transaction. That script changed
+ * `expireAfter` in the same call, so the two hypotheses were never separated
+ * and the list stayed small for months on the strength of the wrong one.
+ *
+ * --limit is kept for bisecting a future failure, and refuses any value that
+ * would drop an address the UI can offer.
  */
 
 import { readFileSync, existsSync } from "node:fs";
@@ -77,22 +82,60 @@ if (!OWNER_KEY) {
 }
 
 /**
- * Read straight from the generated pool rather than importing it — this is a
- * .mjs script and that is a .ts module, and adding a TypeScript loader to set
- * one contract field is not worth it.
+ * Both lists, deduped.
+ *
+ *   lib/ofac-addresses.ts   ~93, from 0xB10C's OFAC digital-currency repo —
+ *                           the list Ethereum block builders use.
+ *   lib/sanctioned-pool.ts   24, generated from the live OpenSanctions feed
+ *                           and the only ones the UI's button can produce.
+ *
+ * They are different snapshots of overlapping data, and neither is a superset.
+ * The pool is what a visitor can reach in one click, so it must be covered;
+ * the OFAC list makes a typed-in address more likely to be caught. Ordered
+ * pool-first so that --limit, if you need to bisect a size failure, keeps the
+ * ones the demo actually uses.
+ *
+ * Read with a regex rather than imported — these are .ts modules and adding a
+ * TypeScript loader to set one contract field is not worth it.
  */
-const pool = [
-  ...readFileSync(join(ROOT, "lib/sanctioned-pool.ts"), "utf8").matchAll(/"(0x[0-9a-fA-F]{40})"/g),
-].map((m) => m[1]);
+function addressesIn(file) {
+  return [...readFileSync(join(ROOT, file), "utf8").matchAll(/"(0x[0-9a-fA-F]{40})"/g)].map(
+    (m) => m[1],
+  );
+}
 
-if (!pool.length) {
-  console.error(RED("No addresses found in lib/sanctioned-pool.ts. Refusing to write an empty"));
-  console.error(RED("denylist — the policy denies on `denylist_not_configured`, so an empty"));
-  console.error(RED("list would deny every transfer and look exactly like screening working."));
+const pool = addressesIn("lib/sanctioned-pool.ts");
+const ofac = addressesIn("lib/ofac-addresses.ts");
+
+const seen = new Set();
+const all = [];
+for (const a of [...pool, ...ofac]) {
+  const k = a.toLowerCase();
+  if (seen.has(k)) continue;
+  seen.add(k);
+  all.push(a);
+}
+
+if (!pool.length || !all.length) {
+  console.error(RED("No addresses found. Refusing to write an empty denylist — the policy"));
+  console.error(RED("denies on `denylist_not_configured`, so an empty list would deny every"));
+  console.error(RED("transfer and look exactly like screening working."));
   process.exit(1);
 }
 
-const addresses = pool.slice(0, LIMIT);
+const addresses = all.slice(0, LIMIT);
+
+/**
+ * Every address the "Sanctioned address" button can produce must be in what we
+ * write. Miss one and a visitor clicks it, gets COMPLIANT for a real OFAC
+ * wallet, and the demo has done the one thing it exists not to do.
+ */
+const missing = pool.filter((p) => !addresses.some((a) => a.toLowerCase() === p.toLowerCase()));
+if (missing.length) {
+  console.error(RED(`\n--limit ${LIMIT} drops ${missing.length} address(es) the UI can offer.`));
+  console.error(RED("A sanctioned pick would then read COMPLIANT. Raise the limit."));
+  process.exit(1);
+}
 const params = { sanctioned_addresses: addresses };
 const policyParams = toHex(new TextEncoder().encode(JSON.stringify(params)));
 
@@ -149,11 +192,22 @@ try {
   /* unknown */
 }
 
+const bytes = (policyParams.length - 2) / 2;
+
 console.log(`\n${B("Denylist params")}`);
 console.log(`  client        ${CLIENT}`);
 console.log(`  policy        ${policyAddress}`);
 console.log(`  addresses     ${currentCount} -> ${addresses.length}`);
-console.log(`  payload       ${(policyParams.length - 2) / 2} bytes`);
+console.log(`                ${pool.length} from the pool, ${all.length - pool.length} more from the OFAC list`);
+console.log(`  payload       ${bytes} bytes`);
+if (bytes > 1200) {
+  // 1106 bytes is the largest payload known to have been accepted. Before
+  // that, deploy/10-shrink-params.mjs cut this from ~4KB to ~0.2KB while
+  // debugging a failure — testing expireAfter and size at the same time, so
+  // it was never established which mattered. Above 1106 is unproven.
+  console.log(`                unproven size — 1106 bytes is the largest known to work.`);
+  console.log(`                if this reverts, bisect with --limit`);
+}
 console.log(`  expireAfter   ${expireAfter}  (carried across)`);
 console.log(`\n${B("Signer")}`);
 console.log(`  address       ${account.address}`);
