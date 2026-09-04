@@ -22,8 +22,11 @@ It has an attestation you can open in the Newton explorer.
 >    backend` even though it serves from `ipfs.io` and Pinata. CIDs pinned in
 >    August resolve. So no newly deployed policy can be read at all.
 >
-> `policy/DEPLOY.md` has the addresses, the evidence, and the one command to
-> switch back.
+> **`STATUS.md` is the single source of truth** — live addresses, the parked
+> yente deployment, the full evidence for the Newton-side blocker, and the exact
+> steps to switch to live yente when their backend recovers. `policy/DEPLOY.md`
+> is the on-chain runbook; `policy/NEWTON-ISSUE.md` is the reproduction for
+> Newton.
 
 The recipient is the only thing screened. Every run still carries a sender —
 transactions have one — but it is freshly generated random bytes and the
@@ -232,12 +235,12 @@ see `policy/DEPLOY.md`.
 - **The site is on the fallback policy** and screens 97 fixed OFAC addresses,
   not a live multi-regime feed. See the box at the top and `policy/DEPLOY.md`.
   Both causes are Newton-side and neither is fixable from here.
-- **`YENTE_URL` points at a Cloudflare *quick* tunnel** — random hostname, dies
-  with the process, tied to a laptop being awake. Even with the oracle path
-  restored, close the lid and every check returns `screening_unavailable`:
-  correct, fail-closed, and indistinguishable to a visitor from the site being
-  broken. A named tunnel would at least survive a restart. yente itself needs
-  Elasticsearch and a periodic dataset load, so it is not a drop-in either.
+- **`YENTE_URL` differs between environments.** Production sends
+  `https://sanctions-api-liard.vercel.app` — a deployed service, not a laptop.
+  `sanctions-oracle/yente-deployment.json` still records a Cloudflare *quick*
+  tunnel (random hostname, dies with the process), which is presumably what
+  local runs use. Worth reconciling: a demo whose screening endpoint depends on
+  which machine submitted the task is a demo with two different behaviours.
 - **The stale-data path has never been exercised.** Set `MAX_AGE_HOURS = 0` in
   `sanctions-api` to force it. The grey `unavailable` verdict has never been
   seen against a genuinely stale feed.

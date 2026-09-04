@@ -62,7 +62,17 @@ git commit -m "$MSG" || echo "    nothing to commit"
 # --rebase, because the remote has picked up commits behind our back before
 # (the case-study branch) and a plain push just gets rejected after the build
 # has already run.
-git pull --rebase
+#
+# Only when there IS an upstream. A branch pushed for the first time has none,
+# and `git pull --rebase` then exits non-zero — which under `set -e` killed
+# this script after it had already committed, leaving the branch built and
+# committed but never deployed.
+if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+  git pull --rebase
+else
+  echo "    no upstream yet — first push of '$BRANCH'"
+fi
+
 git push -u origin "$BRANCH"
 
 # Why not just rely on the push:

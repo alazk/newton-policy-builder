@@ -1,5 +1,8 @@
 # Deploying the corrected policy
 
+> For the current live/parked state and the switch-to-yente steps, read
+> **`../STATUS.md`** first. This file is the deeper on-chain runbook.
+
 ## What the site is running RIGHT NOW
 
 **The denylist policy, not the yente one.** This is a fallback, and the reason
@@ -40,13 +43,19 @@ one.
 
 ## The yente policy: deployed, correct, unreachable
 
+Current (rev-2 — the client `0x7497…` is bound to this):
+
 ```
-policy        0xDDD3AC3ceE21a096407E3D9c921908dB1fb743D2
-cid           bafkreiciv3qsjccb5wjsqzhsgkquhw2vmcxjnwnj6cp3gjkukd7sr42cai
-codeHash      0xa2532ab470713e4d120c8731e1efe0a450346741795e63d286a8b5a7069f4143
-policyData    (new, from the rebuilt wasm — see the deploy output)
-wasmCid       bafybeidjruvdj4q7bhh6hh3agas7czqg6gyshd25qtqgq2eqjzbnjcq4te
+policy        0x990A6E4f57A2561a744EEc169E3fa92Dba098682
+policyData    0x66E2f53107790caB29a6374484d705c7b87fa243
+cid           bafkreidos2nj2mxvqdfndvnccgbhpgxlqa3icuduszmq7uzbcjmsn57wzi
+wasmCid       bafybeidxn6l2eqgidgupesfwz4hm4x4kzcj7pdyi7udbpavywmslot6olm
+codeHash      0xe03c05d35e110453cdc7b197cec5d1e43f462dcb47fe9bc4eec864d93dbb28ba
+entrypoint    newton_yente.allow
 ```
+
+(rev-1 `0xDDD3AC3c…` / cid `bafkreiciv3…` / wasm `bafybeidjruvdj…` was the same
+policy before a content bump to force fresh CIDs; superseded, still on chain.)
 
 Four fixes, all verified on Regorus via `newton-cli policy simulate`:
 
@@ -77,6 +86,19 @@ with eight consecutive 200s. So their store is not public IPFS, and content
 pinned today does not reach it. CIDs pinned in August do. `deploy/1-upload.mjs`
 notes that `cli.newton.xyz` is dead; if that service was what ingested content
 into the operator backend, nothing deployed since can be read.
+
+Ruled out, so nobody repeats them: propagation delay (hours, with the CID
+serving 200 throughout); a bad pin (re-pinned via the legacy public endpoint,
+identical CID, `isDuplicate: true`); authentication (`newton-cli login` then
+redeploy — uploads to Pinata only, no registration step, same error); and a
+stale deployment (`isPolicyVerified()` true, chain source byte-identical to the
+repo). Full write-up in `policy/NEWTON-ISSUE.md`.
+
+Also note `newton-cli policy deploy` reverts with `0x04a5b3ee` on step 2 when
+the wasm CID is unchanged — the factory will not mint a second PolicyData for
+identical content. That is expected, not a failure: the PolicyData already
+exists at `0x7D0371875617d103c8CC28e257125869fA341008`. Use `--skip-data
+--policy-data-address` to redeploy just the Policy.
 
 ### Restoring it
 
