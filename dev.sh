@@ -33,7 +33,7 @@ echo "==> Node $(node -v)"
 # means you see them without them blocking the server — if the page then
 # renders, the errors are cosmetic for now.
 echo "==> Typecheck (informational)"
-npx tsc --noEmit || echo "    ^ type errors above. next dev still runs; next build would not."
+npm run typecheck || echo "    ^ type errors above. next dev still runs; next build would not."
 
 echo "==> Starting dev server"
 echo "    Watch for: 'Ready on http://localhost:3000'"

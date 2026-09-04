@@ -243,6 +243,21 @@ console.log("  Policy has no config until setPolicy is called, and min_score the
 console.log("  falls back to its default — which happens to be the same 0 you have");
 console.log("  today, so a missed setPolicy would look like nothing was wrong.");
 
+/**
+ * `newton-cli policy deploy` reads <policy-dir>/dist, so the file it pins is
+ * dist/policy.rego — a COPY of the source. Which means the one-source rule
+ * this whole layout is built on has a hole in it: edit the source, forget the
+ * copy, and the deploy pins the old policy while every check here reports the
+ * new one. Nothing would look wrong until a verdict was.
+ */
+const DIST = join(dirname(REGO), "dist/policy.rego");
+if (existsSync(DIST) && readFileSync(DIST).toString() !== local.toString()) {
+  say("dist is stale");
+  console.log(RED("  dist/policy.rego differs from policy.rego."));
+  console.log(RED("  deploy pins dist. Re-copy before deploying:"));
+  console.log(`    cp ${REGO_LABEL} ${REGO_LABEL.replace(/policy\.rego$/, "dist/policy.rego")}`);
+}
+
 say(`policyCodeHash for ${REGO_LABEL}`);
 console.log(`  ${keccak256(local)}`);
 console.log("  Pin and hash the same bytes. initialize() commits this and");

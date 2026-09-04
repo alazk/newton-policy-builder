@@ -681,6 +681,15 @@ Recorded so they are not mistaken for decisions:
 - Not verified at 390px on a real device.
 - Keyboard traversal verified per-component, not end to end.
 - The stale screen has not been exercised against a genuinely stale feed
-  (set `MAX_AGE_HOURS = 0` in `sanctions-api` to force it).
-- The `hairline` token is retained but unused — hairlines were removed from the
-  UI and one border weight now covers everything.
+  (set `MAX_AGE_HOURS = 0` in `sanctions-api` to force it). The grey
+  `unavailable` fill has therefore never been seen in the situation it was
+  designed for.
+- `INSET_X` has not been checked by eye at the 900px and 640px breakpoints
+  since it replaced two `!important` overrides. The left line — mark, headings,
+  verdict — should hold all the way down.
+- `.pe-mast` is still on the masthead but has no rules left; it is a selector
+  hook and nothing more.
+
+An earlier entry here claimed the `hairline` token was unused. It is not — it
+draws the masthead and stage borders. The claim was written when decorative
+hairlines were removed from *inside* the panels, and the two were conflated.

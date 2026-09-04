@@ -8,6 +8,12 @@ next-env.d.ts
 .vercel
 .env*
 
+# ...but not the template. `.env*` above matches `.env.local.example` too, so
+# the one file that tells a fresh clone which variables it needs was being
+# excluded along with the secrets. The README says `cp .env.local.example
+# .env.local` as step two of setup, against a file that would not be there.
+!.env.local.example
+
 # macOS writes these into every folder you open in Finder. Three of them got
 # committed in the design-system change because `git add -A` takes everything.
 .DS_Store

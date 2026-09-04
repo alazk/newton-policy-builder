@@ -111,13 +111,47 @@ staleness *visible*; only the API refusing makes it *enforced*.
 
 ## Routes
 
-| Route | Does |
+| Route | Does | Called by the UI |
+| --- | --- | --- |
+| `/api/evaluate` | Submits the task. Rate-limited per IP. | yes |
+| `/api/screen` | Which party is designated, and on which lists. Explanation, not attestation. | yes |
+| `/api/screening-health` | How old the sanctions data is. Drives the stale badge. | yes |
+| `/api/history` | Recent runs, read from Sepolia logs. No database. | **no** |
+| `/api/policy-source` | The deployed policy, resolved from chain and fetched from IPFS. | **no** |
+
+The last two lost their callers when the evidence rail came off the verdict
+panel. Both still work and are worth keeping — `/api/history` is the only
+shared, chain-derived record of runs — but nothing on the site exercises them,
+so nothing on the site will tell you when they break.
+
+---
+
+## The deployed policy
+
+The Rego the operators run is **not in this repo**. It lives at
+`../sanctions-oracle/yente-policy-files/policy.rego`, next to the params
+schema, the metadata and the `policy.wasm` that `newton-cli policy deploy -p`
+reads. One copy, in the directory that deploys it.
+
+`policy/` here holds the tooling around it:
+
+| | |
 | --- | --- |
-| `/api/evaluate` | Submits the task. Rate-limited per IP. |
-| `/api/history` | Recent runs, read from Sepolia logs. No database. |
-| `/api/policy-source` | The deployed policy, resolved from chain and fetched from IPFS. |
-| `/api/screen` | Which party is designated, and on which lists. Explanation, not attestation. |
-| `/api/screening-health` | How old the sanctions data is. |
+| `check.mjs` | Reads Sepolia directly — current CID, config, `policyCodeHash`, and a diff of chain against the source. `--after` compares to the snapshot and says whether a deploy landed. No dev server, no pip. |
+| `bind.mjs` | Points the PolicyClient at a new Policy, carrying `policyParams` across as raw bytes. Dry run unless `--confirm`. Detects and resumes a half-finished bind. |
+| `simargs.mjs` | Builds the intent and wasm-args JSON for `newton-cli policy simulate`, and prints the command. |
+| `gate_test.py` | Six inputs through the old and new confidence gate. `pip install regopy`. |
+| `DEPLOY.md` | What is currently deployed, how to replace it, how to roll back. |
+
+Changing the policy means a **new Policy contract** — `initialize` commits the
+CID and there is no setter — plus a client rebind. `DEPLOY.md` has the order.
+
+Both scripts need `OWNER_PRIVATE_KEY` and friends, which live in
+`../deploy/.env`, not in `.env.local`:
+
+```bash
+set -a; source ../deploy/.env; set +a
+```
 
 ---
 
@@ -133,24 +167,48 @@ that means anything is the outcome.
 ## Deploying
 
 ```bash
-bash deploy.sh
+bash deploy.sh "what changed"
 ```
 
-Refuses if a `.env` file is staged, typechecks, runs the real production build
-locally, then commits, pushes and promotes with `vercel --prod`. The `--prod`
-matters: no domain alias is attached, so a git push alone leaves
-`newton-policy-builder.vercel.app` on the previous build.
+The message is required. Refuses if a `.env` file is staged, typechecks, runs
+the real production build locally, then commits, rebases, pushes and promotes
+with `vercel --prod`. The `--prod` matters: no domain alias is attached, so a
+git push alone leaves `newton-policy-builder.vercel.app` on the previous build.
+
+`vercel` is fetched by `npx` and needs a session — `npx vercel login` if it
+answers `Error: Not authorized`. Nothing else in this repo downloads anything;
+`npm run typecheck` uses the local TypeScript.
+
+This deploys **the site only**. The policy is a separate, on-chain deploy —
+see `policy/DEPLOY.md`.
 
 ---
 
 ## Known gaps
 
+- **`YENTE_URL` points at a tunnel to a laptop.** Close the lid and every check
+  on the deployed site returns `screening_unavailable` — correctly, fail-closed,
+  and indistinguishable to a visitor from the site being broken. This is the
+  single biggest thing between the demo and being genuinely deployed. yente
+  needs Elasticsearch and a periodic dataset load, so it is not a drop-in.
+- **The stale-data path has never been exercised.** Set `MAX_AGE_HOURS = 0` in
+  `sanctions-api` to force it. The grey `unavailable` verdict has never been
+  seen against a genuinely stale feed.
 - **Mobile is untested.** Rules exist below 640px; nobody has opened it on a
   phone.
+- **The new Policy is owned by the deployer key** from `../deploy/.env`
+  (`0x0710868c…`), not the previous owner. Nothing breaks — `owner` gates
+  `setMetadataCid` and `transferOwnership`, not `setPolicy` — but those keys
+  have been pasted into a chat transcript and want rotating, then
+  `transferOwnership`.
 - **Inbound screening is designed, not built** — see `../inbound/DESIGN.md`.
   You cannot block an inbound transfer on a public chain; you gate the credit.
 - **The rate limit is in-memory**, so it resets with the serverless instance
   and is not shared between them. Enough for a stuck retry loop, not for a
   determined abuser.
 - **`lib/catalog.ts` still carries multiple providers and composable rules**
-  that the UI no longer surfaces. It feeds `scripts/emit-rego.mjs`.
+  that the UI no longer surfaces, including payer rules the deployed policy no
+  longer has. It feeds `scripts/emit-rego.mjs` and nothing else.
+- **`generated-policy.rego` and `policy/newton_yente.rego` are stubs** pointing
+  at the real source. They are kept because both filenames appear in older
+  notes, and a file that lies is worse than one that is missing.

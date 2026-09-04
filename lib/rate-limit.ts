@@ -2,10 +2,12 @@
  * A throttle for the one route that spends money.
  *
  * Every call to /api/evaluate creates a real task: it consumes gateway quota
- * against a single API key and puts a row in the PolicyClient's on-chain
- * history that everyone else's "Earlier runs" then reads. The site is public
- * and the button is the entire point, so one person with a loop can drain the
- * quota and bury the shared feed at the same time.
+ * against a single API key and writes a row to the PolicyClient's on-chain
+ * history. The site is public and the button is the entire point, so one
+ * person with a loop can drain the quota on their own.
+ *
+ * (The "Earlier runs" panel that read that history is gone; /api/history still
+ * serves it and nothing calls it. The quota is the live reason this exists.)
  *
  * WHAT THIS IS NOT: durable. Vercel runs each region's functions in separate
  * instances and recycles them freely, so this counter resets when an instance
