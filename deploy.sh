@@ -23,6 +23,22 @@ if [ -z "$MSG" ]; then
   exit 1
 fi
 
+# Only main goes to production.
+#
+# This script ends in `vercel --prod`, which moves the alias. Run it from an
+# experiment branch and the live demo becomes whatever you were mid-way through
+# trying — with no warning, because every step before it succeeds normally.
+#
+# Off main it still commits, pushes and builds; it just deploys to a preview
+# URL instead of promoting. Which is what you want from a branch anyway: a
+# link to look at that nobody else is pointed at.
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+PROMOTE=1
+if [ "$BRANCH" != "main" ]; then
+  PROMOTE=0
+  echo "==> On branch '$BRANCH' — preview deploy, production alias untouched"
+fi
+
 echo "==> Checking nothing secret is staged"
 if git status --porcelain | grep -qE '\.env(\.|$)'; then
   echo "STOP — a .env file is about to be committed."
@@ -47,7 +63,7 @@ git commit -m "$MSG" || echo "    nothing to commit"
 # (the case-study branch) and a plain push just gets rejected after the build
 # has already run.
 git pull --rebase
-git push
+git push -u origin "$BRANCH"
 
 # Why not just rely on the push:
 #
@@ -55,5 +71,13 @@ git push
 # preview URL and leaves newton-policy-builder.vercel.app pointing at whatever
 # was there before. That has cost several rounds of "it's still the old one".
 # --prod is what moves the alias.
-echo "==> Promoting to production"
-npx vercel --prod
+if [ "$PROMOTE" = "1" ]; then
+  echo "==> Promoting to production"
+  npx vercel --prod
+else
+  echo "==> Preview deploy (branch '$BRANCH')"
+  npx vercel
+  echo
+  echo "    newton-policy-builder.vercel.app is unchanged."
+  echo "    Merge to main and run this again to promote."
+fi
