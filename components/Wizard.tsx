@@ -1029,7 +1029,7 @@ function Pickers({
     {
       value: "ofac",
       text: "Sanctioned address",
-      hint: `A real OFAC-designated wallet, present in the deployed list`,
+      hint: `A real sanctioned wallet, present in the deployed list`,
     },
   ];
 

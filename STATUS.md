@@ -17,21 +17,23 @@ quorum signs the decision on Sepolia before the transfer would execute. The
 verdict is a real `newt_createTask` with an attestation you can open in the
 Newton explorer — not a simulation.
 
-It runs on the **params-only denylist policy**: 97 OFAC-designated addresses
-held on-chain in the PolicyClient's params, no WASM oracle, no IPFS fetch at
+It runs on the **params-only denylist policy**: 119 sanctioned addresses held
+on-chain in the PolicyClient's params, no WASM oracle, no IPFS fetch at
 evaluation time. Verified end-to-end on the live site — a clean address
 **Compliant**, a designated address **Non Compliant**, both quorum-signed.
 
-This is a **fixed snapshot, OFAC only**. It is not a live consolidated feed and
-cannot catch a designation made today. The UI and metadata say so; keep it that
-way while this policy is bound.
+This is a **fixed snapshot, Ethereum only**, drawn from four sanctions sources
+(US OFAC SDN 104, Israel MOD 15, Japan MoF 9, France Trésor 2). It is not a live
+feed and cannot catch a designation made after the snapshot. The UI and metadata
+say so; keep it that way while this policy is bound.
 
 ```
 provider (lib/catalog.ts)  local-denylist
 policy client              0xfd054556b4d00d8b0f897b1ae377ecd17fccae78
 policy                     0x627222E71CCEc59C315c83C095f12458FaB5B221
 policy cid                 bafkreigvmehmguzwvy3wla2q56jk25jpfog3ecuym5v6cquoeocjodhqri
-addresses                  97 (lib/sanctioned-pool.ts ∪ lib/ofac-addresses.ts)
+addresses                  119 (lib/ofac-full.ts ∪ pool ∪ 0xB10C list)
+regenerate                 node sanctions-api/emit-full-list.mjs
 ```
 
 To change the list: `node policy/setparams.mjs --confirm` (one transaction, no

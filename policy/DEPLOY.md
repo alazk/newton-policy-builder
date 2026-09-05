@@ -14,7 +14,7 @@ policy        0x627222E71CCEc59C315c83C095f12458FaB5B221
 cid           bafkreigvmehmguzwvy3wla2q56jk25jpfog3ecuym5v6cquoeocjodhqri  (pinned August)
 policyId      0x120a4c18c77638c869571e5f10e42e76d2b314ab664e23ddb724224bf393290c
 entrypoint    newton_sanctions.allow
-params        97 addresses (pool ∪ OFAC list), 4391 bytes
+params        119 addresses (US OFAC/IL/JP/FR, ETH only), 5381 bytes
 expireAfter   300
 ```
 
@@ -23,9 +23,10 @@ to end on the live site — a clean address ALLOWED, and `0x7F367cC4…` (from t
 OFAC-only portion, so it also proves the new entries took) DENIED. Both
 quorum-signed.
 
-It screens a **fixed list of 97 addresses, OFAC only**. Not live screening, no
-EU/UN/UK coverage, and it cannot catch a designation made today. `lib/catalog.ts`
-and the UI copy say so; keep it that way while this is bound.
+It screens a **fixed list of 119 addresses** across US OFAC, Israel, Japan and
+France (Ethereum only). Not live screening, and it cannot catch a designation
+made after the snapshot. Regenerate with `node sanctions-api/emit-full-list.mjs`.
+`lib/catalog.ts` and the UI copy reflect this; keep it that way while bound.
 
 To change the list: `node policy/setparams.mjs --confirm`. One transaction, no
 IPFS. Always re-test a **clean** address afterwards — if a params write fails,

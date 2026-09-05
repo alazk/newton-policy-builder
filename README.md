@@ -9,9 +9,9 @@ It has an attestation you can open in the Newton explorer.
 
 > ### Running on the fallback policy
 >
-> The site currently screens a **fixed list of 97 OFAC addresses** held on
-> chain, not a live consolidated feed. No EU, UN or UK coverage, and it cannot
-> catch a designation made today.
+> The site currently screens a **fixed list of 119 sanctioned addresses** held
+> on chain (US OFAC, Israel, Japan, France; Ethereum only), not a live feed. It
+> cannot catch a designation made after the snapshot.
 >
 > The oracle-backed policy is written, fixed, deployed and verified — it just
 > cannot be reached. Two Newton-side failures:
@@ -232,9 +232,9 @@ see `policy/DEPLOY.md`.
 
 ## Known gaps
 
-- **The site is on the fallback policy** and screens 97 fixed OFAC addresses,
-  not a live multi-regime feed. See the box at the top and `policy/DEPLOY.md`.
-  Both causes are Newton-side and neither is fixable from here.
+- **The site is on the fallback policy** and screens 119 fixed sanctioned
+  addresses (US/IL/JP/FR, ETH only) held on-chain, not a live oracle feed. See
+  the box at the top and `STATUS.md`. The oracle path is blocked Newton-side.
 - **`YENTE_URL` differs between environments.** Production sends
   `https://sanctions-api-liard.vercel.app` — a deployed service, not a laptop.
   `sanctions-oracle/yente-deployment.json` still records a Cloudflare *quick*
