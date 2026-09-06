@@ -51,15 +51,18 @@ by a Newton-side issue (below).
 
 ```
 policy client   0x749753713fC04bbDB5dAf9C66cdE293512fe0eE7   (bound to ↓)
-policy          0x990A6E4f57A2561a744EEc169E3fa92Dba098682
-policy data     0x66E2f53107790caB29a6374484d705c7b87fa243
-policy cid      bafkreidos2nj2mxvqdfndvnccgbhpgxlqa3icuduszmq7uzbcjmsn57wzi
-wasm cid        bafybeidxn6l2eqgidgupesfwz4hm4x4kzcj7pdyi7udbpavywmslot6olm
-code hash       0xe03c05d35e110453cdc7b197cec5d1e43f462dcb47fe9bc4eec864d93dbb28ba
+policy          0xb06abbf45715CB53231d7Dd8b2AfFaBc76485a30   (rev-3)
+policy data     0x6Ed506B76EC859D0dfE2Fca945AD9A2b9038ca82
+policy cid      bafkreie5hep5mo57ukxr6bzvoosofcdrefr6ee4jt3i3ztqlorysdvub74
+wasm cid        bafybeiebq6aensds72cqdejp4w3gmrlka5tervhn3bsj2je436o6h3khd4
+code hash       0x3b1fbfa63a09d4657894644e23aa3b12266ca146be831ee60fa7f823f3feb2b7
 entrypoint      newton_yente.allow
 source          ../sanctions-oracle/yente-policy-files/policy.rego
 oracle API      https://sanctions-api-liard.vercel.app  (1749 wallets, live)
 ```
+
+(rev-1 `0xDDD3AC3c…` and rev-2 `0x990A6E4f…` are superseded, still on chain.
+Each redeploy produced a fresh CID; none ingested — the CID is not the variable.)
 
 The oracle itself is confirmed working: the API is up, and
 `newton-cli policy simulate` returns **DENIED** for a designated address with

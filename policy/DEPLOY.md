@@ -28,6 +28,25 @@ France (Ethereum only). Not live screening, and it cannot catch a designation
 made after the snapshot. Regenerate with `node sanctions-api/emit-full-list.mjs`.
 `lib/catalog.ts` and the UI copy reflect this; keep it that way while bound.
 
+**The deployed rego is frozen — do not edit it to fix the two imprecisions
+below.** Its source is `../deploy/policy-files/policy.rego`, pinned as
+`bafkreigvmehm…`, and that exact CID is why it works: it was ingested into the
+operator backend in August, and — per NEWTON-ISSUE.md — no CID uploaded since
+can be. Change one character of the rego and you get a new CID the operators
+cannot fetch, and the demo goes dark. The rule reads
+`data.params.sanctioned_addresses`, so the address list is updated through
+`setPolicy` params (setparams.mjs) without touching the rego at all.
+
+Two harmless imprecisions live with the freeze:
+
+- Its header comment says "OFAC sanctions screening"; the params are now
+  multi-regime. It is a comment — the rule screens whatever is in the params.
+- It carries `payer_on_sanctions_list`, screening `input.from`. The UI
+  generates a random clean sender, so it never fires. Inert, not wrong.
+
+Both would need a redeploy to correct, and a redeploy breaks ingestion. Leave
+them.
+
 To change the list: `node policy/setparams.mjs --confirm`. One transaction, no
 IPFS. Always re-test a **clean** address afterwards — if a params write fails,
 `denylist_not_configured` fires and everything denies, which is indistinguishable
