@@ -173,31 +173,55 @@ so nothing on the site will tell you when they break.
 
 ## The deployed policy
 
-The Rego the operators run is **not in this repo**. It lives at
-`../sanctions-oracle/yente-policy-files/policy.rego`, next to the params
-schema, the metadata and the `policy.wasm` that `newton-cli policy deploy -p`
-reads. One copy, in the directory that deploys it.
+There are two, and neither Rego file lives in this repo:
 
-`policy/` here holds the tooling around it:
+- **Live (denylist):** `../deploy/policy-files/policy.rego` — the params-only
+  policy the operators run now. Frozen: its CID predates Newton's migration and
+  is why it still resolves; do not edit it (see `policy/DEPLOY.md`). The address
+  list is on-chain params, updated via `setparams.mjs`.
+- **Parked (yente):** `../sanctions-oracle/yente-policy-files/policy.rego` — the
+  oracle-backed policy, next to the params schema, metadata and `policy.wasm`
+  that `newton-cli policy deploy -p` reads. Built and verified, blocked only by
+  Newton's ingestion.
+
+`policy/` here holds the tooling around both:
 
 | | |
 | --- | --- |
 | `check.mjs` | Reads Sepolia directly — current CID, config, `policyCodeHash`, and a diff of chain against the source. `--after` compares to the snapshot and says whether a deploy landed. No dev server, no pip. |
 | `bind.mjs` | Points the PolicyClient at a new Policy, carrying `policyParams` across as raw bytes read from chain. Dry run unless `--confirm`. Detects and resumes a half-finished bind. |
-| `setparams.mjs` | Loads `lib/sanctioned-pool.ts` ∪ `lib/ofac-addresses.ts` into the denylist client's params. One transaction, no IPFS. This is what the live site screens against. |
+| `setparams.mjs` | Loads the on-chain denylist params from `lib/ofac-full.ts` ∪ `lib/sanctioned-pool.ts` ∪ `lib/ofac-addresses.ts`, deduped. **Skips the write when the list is unchanged.** This is what the live site screens against. |
 | `simargs.mjs` | Builds the intent and wasm-args JSON for `newton-cli policy simulate`, and prints the command. |
+| `test-simulate.mjs` | Runs the yente policy in simulate mode (inline Rego) to isolate a policy-fetch failure from a wasm-fetch one. |
+| `watch-yente.sh` | Polls the yente path until the backend ingests the CID; beeps and exits when it resolves. |
 | `gate_test.py` | Six inputs through the old and new confidence gate. `pip install regopy`. |
 | `DEPLOY.md` | What is currently deployed, how to replace it, how to roll back. |
+| `NEWTON-ISSUE.md` | The backend-ingestion reproduction, for Newton. |
 
-Changing the policy means a **new Policy contract** — `initialize` commits the
-CID and there is no setter — plus a client rebind. `DEPLOY.md` has the order.
+Changing the **yente** policy means a new Policy contract (`initialize` commits
+the CID; there is no setter) plus a client rebind — `DEPLOY.md` has the order.
+Changing the **denylist** is different: its address list is on-chain params, so
+`setparams.mjs` updates it in one transaction without a new policy or CID.
 
-Both scripts need `OWNER_PRIVATE_KEY` and friends, which live in
+The on-chain scripts need `OWNER_PRIVATE_KEY` and friends, which live in
 `../deploy/.env`, not in `.env.local`:
 
 ```bash
 set -a; source ../deploy/.env; set +a
 ```
+
+### Keeping the list current
+
+`sanctions-api/emit-full-list.mjs` regenerates `lib/ofac-full.ts` — every
+sanctioned Ethereum address in the live feed, all regimes — from the
+`sanctions-api` snapshot. Run it, then `setparams.mjs --confirm`.
+
+`.github/workflows/refresh-onchain.yml` does this on a daily schedule: it
+regenerates the list, pushes it on-chain **only if it changed** (the skip guard
+means most days cost no gas), then verifies a clean address is Compliant and a
+sanctioned one is Non Compliant, failing the run otherwise. Arm it by adding
+repo secrets: `OWNER_PRIVATE_KEY` (rotate the exposed one first),
+`POLICY_CLIENT_DENYLIST`, optional `SEPOLIA_RPC_URL`, `NEWTON_API_KEY`.
 
 ---
 
