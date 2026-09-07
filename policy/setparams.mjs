@@ -187,13 +187,27 @@ const current = await pub
 const expireAfter = Number(current?.expireAfter ?? current?.[1] ?? 0) || 300;
 
 let currentCount = 0;
+let currentSet = null;
 try {
   const raw = current?.policyParams ?? current?.[0] ?? "0x";
-  currentCount = JSON.parse(Buffer.from(raw.slice(2), "hex").toString("utf8"))
-    .sanctioned_addresses.length;
+  const parsed = JSON.parse(Buffer.from(raw.slice(2), "hex").toString("utf8"));
+  currentCount = parsed.sanctioned_addresses.length;
+  currentSet = new Set(parsed.sanctioned_addresses.map((a) => a.toLowerCase()));
 } catch {
-  /* unknown */
+  /* unknown — treat as "changed" so a first write always goes through */
 }
+
+/**
+ * Skip the write when the on-chain list already equals what we would send.
+ *
+ * The scheduled refresh runs daily but the sanctioned-ETH set moves rarely, so
+ * without this every run spends a setPolicy on identical bytes. Compare as
+ * lowercased sets — order and case must not count as a change, or the guard
+ * never triggers and we pay anyway.
+ */
+const nextSet = new Set(addresses.map((a) => a.toLowerCase()));
+const unchanged =
+  currentSet && currentSet.size === nextSet.size && [...nextSet].every((a) => currentSet.has(a));
 
 const bytes = (policyParams.length - 2) / 2;
 
@@ -223,6 +237,11 @@ console.log(`  balance       ${formatEther(balance)} ETH`);
 if (owner.toLowerCase() !== account.address.toLowerCase()) {
   console.error(RED("\nSigner is not the client owner. setPolicy is onlyPolicyClientOwner."));
   process.exit(1);
+}
+
+if (unchanged) {
+  console.log(`\n${B("No change")} — on-chain list already matches (${addresses.length}). Nothing to send.`);
+  process.exit(0);
 }
 
 if (!CONFIRM) {

@@ -36,9 +36,17 @@ addresses                  119 (lib/ofac-full.ts ∪ pool ∪ 0xB10C list)
 regenerate                 node sanctions-api/emit-full-list.mjs
 ```
 
-To change the list: `node policy/setparams.mjs --confirm` (one transaction, no
-IPFS). Always re-test a **clean** address after — a failed params write makes
-the policy deny everything, which looks identical to it working.
+To change the list by hand: `node policy/setparams.mjs --confirm` (one
+transaction, no IPFS). It **skips the write when the on-chain list already
+matches**, and always re-test a **clean** address after — a failed params write
+makes the policy deny everything, which looks identical to it working.
+
+**Auto-refresh:** `.github/workflows/refresh-onchain.yml` runs daily, after
+sanctions-api's own refresh, regenerates the Ethereum list, and pushes it
+on-chain only if it changed — then verifies a clean address is Compliant and a
+sanctioned one is Non Compliant, failing the run if not. Needs repo secrets:
+`OWNER_PRIVATE_KEY` (rotate the exposed one first), `POLICY_CLIENT_DENYLIST`,
+optional `SEPOLIA_RPC_URL`, and `NEWTON_API_KEY`. Most days it spends no gas.
 
 ---
 
