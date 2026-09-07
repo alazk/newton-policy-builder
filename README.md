@@ -1,4 +1,4 @@
-# Newton Sanctions Policy Engine
+# Newton Sanctions Demo
 
 Enter a recipient. It is screened against a sanctions list and an operator
 quorum signs the decision on Ethereum Sepolia **before** the transfer would
@@ -219,7 +219,7 @@ bash deploy.sh "what changed"
 The message is required. Refuses if a `.env` file is staged, typechecks, runs
 the real production build locally, then commits, rebases, pushes and promotes
 with `vercel --prod`. The `--prod` matters: no domain alias is attached, so a
-git push alone leaves `newton-policy-builder.vercel.app` on the previous build.
+git push alone leaves `newton-sanctions-demo.vercel.app` on the previous build.
 
 `vercel` is fetched by `npx` and needs a session — `npx vercel login` if it
 answers `Error: Not authorized`. Nothing else in this repo downloads anything;

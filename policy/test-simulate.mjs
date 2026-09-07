@@ -21,7 +21,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const APP = process.env.APP_URL || "https://newton-policy-builder.vercel.app";
+const APP = process.env.APP_URL || "https://newton-sanctions-demo.vercel.app";
 
 const to = process.argv[2] || "0x175d44451403edf28469df03a9280c1197adb92c";
 const from = "0x1111111111111111111111111111111111111111";

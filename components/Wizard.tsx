@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Newton Sanctions Policy Engine.
+ * Newton Sanctions Demo.
  *
  * The deployed policy already decides correctly — that is verified in both
  * directions by sanctions-oracle/verify-both.mjs. What this page has to do is

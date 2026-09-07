@@ -26,11 +26,11 @@ const sans = Inter({
  * lists, decided by a quorum before the transfer runs.
  */
 export const metadata: Metadata = {
-  title: "Newton Sanctions Policy Engine",
+  title: "Newton Sanctions Demo",
   description:
     "Sanctions screening enforced before a transaction executes. The recipient is checked against a sanctions list bound to the policy on chain, and the decision is signed by an operator quorum on Ethereum Sepolia.",
   openGraph: {
-    title: "Newton Sanctions Policy Engine",
+    title: "Newton Sanctions Demo",
     description:
       "Sanctions screening enforced before a transaction executes, signed by an operator quorum on Ethereum Sepolia.",
     type: "website",

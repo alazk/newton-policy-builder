@@ -1,4 +1,4 @@
-# Newton Policy Engine — Design System
+# Newton Sanctions Demo — Design System
 
 Self-contained. Every value used by the demo is written out below; nothing here
 points at a Figma file, an image, or a sheet you have to go and open. The

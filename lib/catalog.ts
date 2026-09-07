@@ -180,7 +180,7 @@ export interface Goal {
 export const GOALS: Record<string, Goal> = {
   sanctions: {
     id: "sanctions",
-    name: "Newton Sanctions Policy Engine",
+    name: "Newton Sanctions Demo",
     blurb:
       "Block payments to or from sanctioned addresses, enforced on-chain by an operator quorum before the transaction executes.",
     /*
