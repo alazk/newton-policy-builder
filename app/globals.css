@@ -118,12 +118,22 @@ a {
  * cheap. Clipping moves an edge across a gradient that is already at its
  * final size.
  */
+/*
+ * `round 24px` matches the stage radius (R.xl).
+ *
+ * Without it the wash ends at inset(0 0 0 0) — a square-cornered clip. Safari
+ * (and iOS especially) intersects that clip OVER the fill's border-radius, so
+ * the finished gradient shows square corners poking past the rounded card even
+ * though the element itself is rounded. Rounding the clip keeps the corners.
+ * The headline (.pe-reveal) shares these frames; a rounded clip on a text block
+ * is harmless since the text never reaches the corners.
+ */
 @keyframes peWash {
   from {
-    clip-path: inset(0 100% 0 0);
+    clip-path: inset(0 100% 0 0 round 24px);
   }
   to {
-    clip-path: inset(0 0 0 0);
+    clip-path: inset(0 0 0 0 round 24px);
   }
 }
 
