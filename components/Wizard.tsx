@@ -1484,6 +1484,7 @@ function Decision({
         margin permanently for a string that is empty almost always.
       */}
       <div
+        className="pe-actions"
         style={{
           display: "flex",
           alignItems: "center",
@@ -1495,12 +1496,15 @@ function Decision({
           <span style={{ ...small(), color: BODY, flexShrink: 0 }}>Inputs changed · run again</span>
         )}
 
-        <div style={{ flex: 1, height: 1, background: "rgba(27,27,27,0.16)" }} />
+        {/* The divider that the buttons ride. Hidden on mobile, where the
+            buttons stack full-width and a horizontal rule between them is
+            noise. */}
+        <div className="pe-actions-line" style={{ flex: 1, height: 1, background: "rgba(27,27,27,0.16)" }} />
 
         <button
           type="button"
           onClick={onReset}
-          className="pe-reset"
+          className="pe-reset pe-action-btn"
           style={{
             flexShrink: 0,
             height: H.control,
@@ -1511,6 +1515,7 @@ function Decision({
             color: INK,
             display: "flex",
             alignItems: "center",
+            justifyContent: "center",
             ...label(),
           }}
         >
@@ -1522,7 +1527,7 @@ function Decision({
             href={outcome.explorerUrl}
             target="_blank"
             rel="noreferrer"
-            className="pe-dark"
+            className="pe-dark pe-action-btn"
             style={{
               flexShrink: 0,
               height: H.control,
@@ -1530,11 +1535,17 @@ function Decision({
               borderRadius: R_PILL,
               display: "flex",
               alignItems: "center",
+              justifyContent: "center",
               gap: SP.x1,
+              // Wraps to two lines on a narrow phone rather than overflowing
+              // the viewport; the label wins over a fixed pill height there.
+              minWidth: 0,
               ...label(),
             }}
           >
-            View attestation on the Newton explorer ↗
+            {/* Full label on desktop; the "on the Newton explorer" tail is
+                hidden on mobile via CSS to keep the pill on one screen. */}
+            View attestation<span className="pe-attest-tail">&nbsp;on the Newton explorer</span> ↗
           </a>
         )}
       </div>

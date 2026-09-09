@@ -387,6 +387,31 @@ a {
     align-items: flex-start !important;
     gap: 16px !important;
   }
+
+  /*
+   * Action rule → stacked full-width buttons.
+   *
+   * On desktop "New check" and the attestation link ride a divider in one row.
+   * At 375px the attestation pill's label ran off the right edge (it was
+   * flex-shrink: 0 with no room to go). On a phone the two actions stack, each
+   * full width, and the divider between them is dropped — a horizontal rule
+   * separating two stacked buttons is just noise.
+   */
+  .pe-actions {
+    flex-wrap: wrap;
+    gap: 12px !important;
+  }
+  .pe-actions-line {
+    display: none;
+  }
+  .pe-action-btn {
+    flex: 1 1 100% !important;
+    text-align: center;
+  }
+  /* Drop the long tail of the attestation label so it fits on one line. */
+  .pe-attest-tail {
+    display: none;
+  }
 }
 
 ::-webkit-scrollbar {
