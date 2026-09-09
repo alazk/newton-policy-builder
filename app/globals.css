@@ -380,6 +380,14 @@ a {
     min-height: 0 !important;
   }
 
+  /* Drop the hairline on a phone. Because the stage stays overflow: visible
+     here (so a tall verdict is not clipped), the 1px border sits just outside
+     the rounded gradient as a faint ring against the page. Colour kept in the
+     box model — transparent, not removed — so nothing shifts by a pixel. */
+  .pe-stage {
+    border-color: transparent !important;
+  }
+
   .pe-console {
     gap: 16px;
   }
