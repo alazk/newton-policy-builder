@@ -1666,6 +1666,14 @@ function PartyBlock({ name, address, party }: { name: string; address: string; p
             {party.sanctioned ? "Designated" : "Clear"}
           </Tag>
         )}
+        {/* On a phone Copy rides up here beside the tag; the long address gets
+            the whole next row to itself instead of sharing it with a button
+            that pushed the wrapped hash off-balance. Hidden on desktop. */}
+        <span className="pe-copy-mobile" style={{ display: "none", flexShrink: 0 }}>
+          <Cta variant="outline" size="sm" onClick={copy} title={address}>
+            {copied ? "Copied" : "Copy"}
+          </Cta>
+        </span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: SP.x1, minHeight: H.chip }}>
         {/*
@@ -1675,9 +1683,11 @@ function PartyBlock({ name, address, party }: { name: string; address: string; p
           tidiness.
         */}
         <span style={{ fontFamily: MONO, ...T.mono, wordBreak: "break-all" }}>{address}</span>
-        <Cta variant="outline" size="sm" onClick={copy} title={address} style={{ flexShrink: 0 }}>
-          {copied ? "Copied" : "Copy"}
-        </Cta>
+        <span className="pe-copy-desktop" style={{ flexShrink: 0 }}>
+          <Cta variant="outline" size="sm" onClick={copy} title={address}>
+            {copied ? "Copied" : "Copy"}
+          </Cta>
+        </span>
       </div>
     </div>
   );
