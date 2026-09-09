@@ -1147,6 +1147,22 @@ function Radio({
  * quorum, and a moving number would be invented.
  */
 function Screening({ to, onCancel }: { to: string; onCancel: () => void }) {
+  /*
+   * Indicative phase progress. Step 1 is true immediately — we did submit the
+   * task. 2 and 3 advance on a short timer so the ordered phases are visible
+   * even though a denylist check returns in ~2s. The verdict replaces this
+   * panel the instant the real result lands, whatever phase we are on.
+   */
+  const [phase, setPhase] = useState(1);
+  useEffect(() => {
+    const t2 = setTimeout(() => setPhase(2), 650);
+    const t3 = setTimeout(() => setPhase(3), 1500);
+    return () => {
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+  }, []);
+
   return (
     <div
       style={{
@@ -1227,18 +1243,23 @@ function Screening({ to, onCancel }: { to: string; onCancel: () => void }) {
 
       <div style={{ marginTop: SP.x4, display: "flex", flexDirection: "column", gap: SP.x1_5 }}>
         {/*
-          Only the first step can be marked done, and only because we did it.
-          The gateway returns once, at the end — there is no progress to read
-          from a quorum mid-flight — so ticking 02 and 03 on a timer would be
-          inventing status.
+          The three phases are real and strictly ordered — submit, screen,
+          quorum — but the gateway reports only once, at the end, so we cannot
+          confirm each individually. They advance on an estimated cadence
+          (see `phase` below) as an indication of progress, not a per-phase
+          receipt; whatever phase we are showing when the real verdict lands,
+          the panel is replaced by it. Honest because the order is true and the
+          only claim made is "in progress", never "confirmed".
         */}
-        <Step n={1} done>
+        <Step n={1} done={phase >= 1}>
           Task submitted to the Newton gateway
         </Step>
-        <Step n={2}>
+        <Step n={2} done={phase >= 2}>
           Screened against the sanctions list bound to the policy on chain
         </Step>
-        <Step n={3}>Operator quorum evaluates the policy and signs the result</Step>
+        <Step n={3} done={phase >= 3}>
+          Operator quorum evaluates the policy and signs the result
+        </Step>
       </div>
 
       <div
@@ -1264,6 +1285,92 @@ function Step({ n, children, done }: { n: number; children: React.ReactNode; don
       </span>
       <span style={{ ...T.value, fontFamily: SANS, color: done ? INK : BODY }}>{children}</span>
     </div>
+  );
+}
+
+/* ── Shared: Tag (label) and Cta (button) ─────────────────────
+ *
+ * The two were conflated: status labels like "Clear" and "Listed on" were
+ * drawn as bordered pills, identical to pressable things like "Copy". A label
+ * states a fact about the outcome; a Cta is something you do. They should not
+ * look the same. Tag is a soft-filled, borderless, non-interactive badge; Cta
+ * is the single pill-button treatment everything pressable goes through.
+ */
+
+function Tag({
+  tone = "muted",
+  children,
+}: {
+  tone?: "strong" | "muted";
+  children: React.ReactNode;
+}) {
+  const tones = {
+    // "Designated" / "Listed on X" — the finding, so it carries weight.
+    strong: { background: "rgba(27,27,27,0.10)", color: INK },
+    // "Clear" / "No match on X" — reassurance, so it recedes.
+    muted: { background: "rgba(27,27,27,0.05)", color: MUTED },
+  } as const;
+  return (
+    <span
+      style={{
+        ...small(),
+        borderRadius: R_PILL,
+        padding: `${SP.half}px ${SP.x1_5}px`,
+        whiteSpace: "nowrap",
+        ...tones[tone],
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function Cta({
+  variant = "outline",
+  size = "md",
+  href,
+  onClick,
+  title,
+  style,
+  children,
+}: {
+  variant?: "fill" | "outline";
+  size?: "sm" | "md";
+  href?: string;
+  onClick?: () => void;
+  title?: string;
+  style?: React.CSSProperties;
+  children: React.ReactNode;
+}) {
+  const fill = variant === "fill";
+  const base: React.CSSProperties = {
+    height: size === "sm" ? H.chip : H.control,
+    padding: size === "sm" ? `0 ${SP.x2}px` : `0 ${SP.x3}px`,
+    borderRadius: R_PILL,
+    border: `${BORDER}px solid ${INK}`,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: SP.x1,
+    cursor: "pointer",
+    ...label(),
+    // fill's colours come from .pe-dark, so its :hover works (inline styles
+    // would out-specify the hover rule); outline sets its own flat colours.
+    ...(fill ? {} : { background: "transparent", color: INK }),
+    ...style,
+  };
+  // pe-dark → primary fill + hover. pe-action-btn (the mobile full-width
+  // stack rule) only belongs on the md action-rule buttons; a sm inline chip
+  // like Copy must not stretch to 100% on a phone.
+  const cls = `pe-reset${size === "sm" ? "" : " pe-action-btn"}${fill ? " pe-dark" : ""}`;
+  return href ? (
+    <a href={href} target="_blank" rel="noreferrer" className={cls} style={base}>
+      {children}
+    </a>
+  ) : (
+    <button type="button" onClick={onClick} title={title} className={cls} style={base}>
+      {children}
+    </button>
   );
 }
 
@@ -1419,18 +1526,7 @@ function Decision({
         <div style={{ display: "flex", flexWrap: "wrap", gap: SP.x1, marginTop: SP.x3, alignItems: "center" }}>
           <span style={{ ...small(), color: "rgba(27,27,27,0.6)" }}>Listed on</span>
           {regimes.map((r) => (
-            <span
-              key={r}
-              style={{
-                borderRadius: R_PILL,
-                border: `${BORDER}px solid ${INK}`,
-                background: "rgba(27,27,27,0.08)",
-                padding: `${SP.x1}px ${SP.x2}px`,
-                ...label(),
-              }}
-            >
-              {r}
-            </span>
+            <Tag key={r} tone="strong">{r}</Tag>
           ))}
         </div>
       )}
@@ -1501,52 +1597,16 @@ function Decision({
             noise. */}
         <div className="pe-actions-line" style={{ flex: 1, height: 1, background: "rgba(27,27,27,0.16)" }} />
 
-        <button
-          type="button"
-          onClick={onReset}
-          className="pe-reset pe-action-btn"
-          style={{
-            flexShrink: 0,
-            height: H.control,
-            padding: `0 ${SP.x3}px`,
-            borderRadius: R_PILL,
-            border: `${BORDER}px solid ${INK}`,
-            background: "transparent",
-            color: INK,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            ...label(),
-          }}
-        >
+        <Cta variant="outline" onClick={onReset} style={{ flexShrink: 0 }}>
           New check
-        </button>
+        </Cta>
 
         {outcome.explorerUrl && (
-          <a
-            href={outcome.explorerUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="pe-dark pe-action-btn"
-            style={{
-              flexShrink: 0,
-              height: H.control,
-              padding: `0 ${SP.x3}px`,
-              borderRadius: R_PILL,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: SP.x1,
-              // Wraps to two lines on a narrow phone rather than overflowing
-              // the viewport; the label wins over a fixed pill height there.
-              minWidth: 0,
-              ...label(),
-            }}
-          >
+          <Cta variant="fill" href={outcome.explorerUrl} style={{ flexShrink: 0, minWidth: 0 }}>
             {/* Full label on desktop; the "on the Newton explorer" tail is
                 hidden on mobile via CSS to keep the pill on one screen. */}
             View attestation<span className="pe-attest-tail">&nbsp;on the Newton explorer</span> ↗
-          </a>
+          </Cta>
         )}
       </div>
 
@@ -1595,17 +1655,9 @@ function PartyBlock({ name, address, party }: { name: string; address: string; p
       <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
         <span style={{ ...small(), color: "rgba(27,27,27,0.62)" }}>{name}</span>
         {party && (
-          <span
-            style={{
-              ...small(),
-              color: party.sanctioned ? INK : "rgba(27,27,27,0.5)",
-              border: `${BORDER}px solid ${party.sanctioned ? INK : "rgba(27,27,27,0.25)"}`,
-              borderRadius: R_PILL,
-              padding: `${SP.half}px ${SP.x1}px`,
-            }}
-          >
+          <Tag tone={party.sanctioned ? "strong" : "muted"}>
             {party.sanctioned ? "Designated" : "Clear"}
-          </span>
+          </Tag>
         )}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: SP.x1 }}>
@@ -1616,20 +1668,9 @@ function PartyBlock({ name, address, party }: { name: string; address: string; p
           tidiness.
         */}
         <span style={{ fontFamily: MONO, ...T.mono, wordBreak: "break-all" }}>{address}</span>
-        <button
-          type="button"
-          onClick={copy}
-          className="pe-reset"
-          title={address}
-          style={{
-            borderRadius: R_PILL,
-            border: `${BORDER}px solid rgba(27,27,27,0.3)`,
-            padding: `${SP.half}px ${SP.x1}px`,
-            ...small(),
-          }}
-        >
+        <Cta variant="outline" size="sm" onClick={copy} title={address} style={{ flexShrink: 0 }}>
           {copied ? "Copied" : "Copy"}
-        </button>
+        </Cta>
       </div>
     </div>
   );
