@@ -412,21 +412,6 @@ a {
   .pe-attest-tail {
     display: none;
   }
-
-  /*
-   * Copy moves up beside the Designated/Clear tag on a phone.
-   *
-   * On the address row the wrapped 42-char hash and the button fought for the
-   * same line; giving the address the full row and lifting Copy into the label
-   * row reads cleaner. The button is rendered in both places and toggled here,
-   * so its copied state stays shared.
-   */
-  .pe-copy-desktop {
-    display: none;
-  }
-  .pe-copy-mobile {
-    display: inline-flex !important;
-  }
 }
 
 ::-webkit-scrollbar {

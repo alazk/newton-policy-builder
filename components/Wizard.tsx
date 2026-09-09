@@ -1659,6 +1659,9 @@ function PartyBlock({ name, address, party }: { name: string; address: string; p
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: SP.half }}>
+      {/* Copy rides beside the tag at every width, sized to match it — the
+          two read as a matched pair, and the long address gets the whole next
+          row to itself instead of sharing it with a button. */}
       <div style={{ display: "flex", alignItems: "center", gap: 9, minHeight: H.chip - 12 }}>
         <span style={{ ...small(), color: "rgba(27,27,27,0.62)" }}>{name}</span>
         {party && (
@@ -1666,14 +1669,15 @@ function PartyBlock({ name, address, party }: { name: string; address: string; p
             {party.sanctioned ? "Designated" : "Clear"}
           </Tag>
         )}
-        {/* On a phone Copy rides up here beside the tag; the long address gets
-            the whole next row to itself instead of sharing it with a button
-            that pushed the wrapped hash off-balance. Hidden on desktop. */}
-        <span className="pe-copy-mobile" style={{ display: "none", flexShrink: 0 }}>
-          <Cta variant="outline" size="sm" onClick={copy} title={address}>
-            {copied ? "Copied" : "Copy"}
-          </Cta>
-        </span>
+        <Cta
+          variant="outline"
+          size="sm"
+          onClick={copy}
+          title={address}
+          style={{ height: 28, padding: `0 ${SP.x1_5}px`, flexShrink: 0 }}
+        >
+          {copied ? "Copied" : "Copy"}
+        </Cta>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: SP.x1, minHeight: H.chip }}>
         {/*
@@ -1683,11 +1687,6 @@ function PartyBlock({ name, address, party }: { name: string; address: string; p
           tidiness.
         */}
         <span style={{ fontFamily: MONO, ...T.mono, wordBreak: "break-all" }}>{address}</span>
-        <span className="pe-copy-desktop" style={{ flexShrink: 0 }}>
-          <Cta variant="outline" size="sm" onClick={copy} title={address}>
-            {copied ? "Copied" : "Copy"}
-          </Cta>
-        </span>
       </div>
     </div>
   );
