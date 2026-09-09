@@ -1427,7 +1427,16 @@ function Decision({
         key={outcome.verdict}
         aria-hidden
         className="pe-wash"
-        style={{ position: "absolute", inset: 0, backgroundImage: FILL[outcome.verdict] }}
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: FILL[outcome.verdict],
+          // Match the stage's radius. On a phone the stage is forced to
+          // overflow: visible (so the page scrolls instead of the panel), which
+          // means it no longer clips this fill — without its own radius the
+          // gradient's square corners poked past the rounded card.
+          borderRadius: R_CARD,
+        }}
       />
 
       {/*
