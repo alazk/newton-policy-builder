@@ -1612,7 +1612,7 @@ function Decision({
 
       <div
         className="pe-parties"
-        style={{ display: "flex", alignItems: "flex-end", gap: SP.x3, flexWrap: "wrap" }}
+        style={{ display: "flex", alignItems: "flex-start", gap: SP.x3, flexWrap: "wrap" }}
       >
         {/* No Designated/Clear tag when nothing was screened — an unscreened
             address is not a clear one. */}
@@ -1623,11 +1623,18 @@ function Decision({
           then". A screenshot of this panel without a time is not evidence of
           anything.
         */}
+        {/* Row heights match PartyBlock (label row = tag height, value row =
+            the Copy button height) so "Decided" lines up with "Recipient" and
+            the timestamp lines up with the address beside it. */}
         <div style={{ display: "flex", flexDirection: "column", gap: SP.half }}>
-          <span style={{ ...small(), color: "rgba(27,27,27,0.62)" }}>Decided</span>
+          <div style={{ display: "flex", alignItems: "center", minHeight: H.chip - 12 }}>
+            <span style={{ ...small(), color: "rgba(27,27,27,0.62)" }}>Decided</span>
+          </div>
           {/* Sans, not mono. A timestamp is not a hash, and setting it like
               one made it compete with the addresses beside it. */}
-          <span style={{ ...small() }}>{stamp(outcome.decidedAt)}</span>
+          <div style={{ display: "flex", alignItems: "center", minHeight: H.chip }}>
+            <span style={{ ...small() }}>{stamp(outcome.decidedAt)}</span>
+          </div>
         </div>
 
       </div>
@@ -1652,7 +1659,7 @@ function PartyBlock({ name, address, party }: { name: string; address: string; p
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: SP.half }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, minHeight: H.chip - 12 }}>
         <span style={{ ...small(), color: "rgba(27,27,27,0.62)" }}>{name}</span>
         {party && (
           <Tag tone={party.sanctioned ? "strong" : "muted"}>
@@ -1660,7 +1667,7 @@ function PartyBlock({ name, address, party }: { name: string; address: string; p
           </Tag>
         )}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: SP.x1 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: SP.x1, minHeight: H.chip }}>
         {/*
           Whole, not truncated. Two different addresses can share a prefix and
           a suffix, and this panel is the thing people screenshot as the
