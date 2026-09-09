@@ -1616,7 +1616,29 @@ function Decision({
       >
         {/* No Designated/Clear tag when nothing was screened — an unscreened
             address is not a clear one. */}
-        <PartyBlock name="Recipient" address={to} party={outcome.verdict === "unavailable" ? undefined : p?.to} />
+        {/*
+          The tag is derived from the verdict so it lands WITH the panel, not
+          after it. Attribution (p.to) arrives from a second lookup a beat
+          later and carries the datasets; until it does, the recipient's status
+          is already settled by the signed verdict — block means designated,
+          pass means clear — so there is no reason to withhold the tag and let
+          it pop in behind the Copy button. When p.to arrives it takes over
+          (same sanctioned value, now with datasets).
+        */}
+        <PartyBlock
+          name="Recipient"
+          address={to}
+          party={
+            outcome.verdict === "unavailable"
+              ? undefined
+              : (p?.to ?? {
+                  address: to,
+                  screened: true,
+                  sanctioned: outcome.verdict === "block",
+                  datasets: [],
+                })
+          }
+        />
 
         {/*
           "Was this address clean" is not answerable; only "was it clean
