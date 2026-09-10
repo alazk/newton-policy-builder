@@ -39,18 +39,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout policy-builder
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: policy-builder
 
       - name: Checkout sanctions-api (for the fresh wallet snapshot)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: alazk/sanctions-api
           path: sanctions-api
           # If sanctions-api is private, add: token: ${{ secrets.REPO_READ_TOKEN }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
 
