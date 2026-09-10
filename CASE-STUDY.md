@@ -120,9 +120,9 @@ The screening list in this demonstration is a **fixed snapshot of designated
 digital-currency addresses**, committed on-chain as policy parameters. It draws
 from several sanctions sources — US OFAC, Israeli MOD, Japanese MoF and French
 Trésor — and covers Ethereum addresses only. As a snapshot it reflects those
-lists as of the last update, not a live feed: it does not automatically pick up
-a designation made afterward, and the project refreshes the on-chain list when
-the sources change. A variant that reads OpenSanctions live through a
+lists as of the moment it was captured, not a live feed: it does not
+automatically pick up a designation made afterward, and a newer snapshot is
+cut and committed by hand when required. A variant that reads OpenSanctions live through a
 self-hosted yente data oracle at the moment of each check — continuous coverage,
 more regimes, and every crypto asset rather than Ethereum only — is supported by
 the same policy model and is the natural next step where that is required.

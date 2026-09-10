@@ -200,10 +200,10 @@ try {
 /**
  * Skip the write when the on-chain list already equals what we would send.
  *
- * The scheduled refresh runs daily but the sanctioned-ETH set moves rarely, so
- * without this every run spends a setPolicy on identical bytes. Compare as
- * lowercased sets — order and case must not count as a change, or the guard
- * never triggers and we pay anyway.
+ * Re-running to cut a fresh snapshot is cheap and common, but the sanctioned-ETH
+ * set moves rarely — without this every run spends a setPolicy on identical
+ * bytes. Compare as lowercased sets — order and case must not count as a change,
+ * or the guard never triggers and we pay anyway.
  */
 const nextSet = new Set(addresses.map((a) => a.toLowerCase()));
 const unchanged =

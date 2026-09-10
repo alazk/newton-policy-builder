@@ -60,30 +60,24 @@ an empty sanctions list is not evidence that an address is clean.
 
 ## The sanctions list
 
-`lib/ofac-full.ts` holds every sanctioned Ethereum address in the live
-OpenSanctions feed (all regimes — currently ~119, across US OFAC, Israel, Japan
-and France). Regenerate it from the `sanctions-api` snapshot:
+`lib/ofac-full.ts` holds every sanctioned Ethereum address from a **point-in-time
+snapshot** of the OpenSanctions feed (all regimes — currently ~119, across US
+OFAC, Israel, Japan and France). It is captured once and frozen on-chain; it does
+not track the feed automatically.
+
+To cut a new snapshot, regenerate the list from the `sanctions-api` data and push
+it to the on-chain params by hand:
 
 ```bash
-node scripts/emit-full-list.mjs   # reads ../sanctions-api/wallets.json
-```
+node scripts/emit-full-list.mjs         # reads ../sanctions-api/wallets.json → lib/ofac-full.ts
 
-Push the list to the on-chain params (one transaction, skips if unchanged):
-
-```bash
 set -a; source ../deploy/.env; set +a   # OWNER_PRIVATE_KEY etc.
-node policy/setparams.mjs            # dry run
-node policy/setparams.mjs --confirm  # send
+node policy/setparams.mjs               # dry run
+node policy/setparams.mjs --confirm     # send (one transaction, skips if unchanged)
 ```
 
 Always re-test a **clean** address afterward — a failed params write makes the
 policy deny everything, which looks identical to it working.
-
-**Auto-refresh.** `.github/workflows/refresh-onchain.yml` runs daily, after the
-`sanctions-api` feed refreshes: it regenerates the list, pushes it on-chain only
-if it changed, then verifies a clean address is Compliant and a sanctioned one
-Non Compliant. Arm it with repo secrets `OWNER_PRIVATE_KEY`,
-`POLICY_CLIENT_DENYLIST`, optional `SEPOLIA_RPC_URL` and `NEWTON_API_KEY`.
 
 ---
 
@@ -120,7 +114,8 @@ Verdict fills carry the only meaningful colour; interaction is ink.
 ## Notes
 
 - Runs on **Ethereum Sepolia**, a test network.
-- The list is a **snapshot**, refreshed on a schedule — it does not pick up a
-  designation the instant it is made.
+- The list is a **frozen snapshot** — it does not pick up a designation made
+  after the snapshot was cut. Re-run the steps under "The sanctions list" to
+  capture a newer one.
 - An oracle-backed variant that screens a live feed at evaluation time lives in
   `../sanctions-oracle/`; `policy/DEPLOY.md` covers deploying it.
