@@ -48,16 +48,34 @@ if (!wallets.length) {
   process.exit(1);
 }
 
-// First-seen order, de-duplicated. The address may appear under more than one
-// dataset (a wallet sanctioned by two regimes); it is one entry on-chain.
+// The address may live in `caption` (checksum case), be embedded in `id`
+// (e.g. "fr-ga-wallet-eth-0x…"), or — for other snapshot shapes — sit in an
+// `address`/`wallet` field or be the entry itself if it's a bare string. Try
+// the clean fields first, then fall back to scanning the whole entry for an
+// 0x + 40-hex run. Lower-cased and de-duplicated in first-seen order; a wallet
+// sanctioned by two regimes is still one entry on-chain.
+const ANY_ETH = /0x[0-9a-fA-F]{40}/;
 const seen = new Set();
 const addresses = [];
 const regimeTally = new Map(); // dataset slug → count, for the human summary only
 
+function pick(w) {
+  if (typeof w === "string") return ETH.test(w.trim()) ? w.trim() : null;
+  for (const field of [w?.caption, w?.address, w?.wallet, w?.id]) {
+    if (typeof field !== "string") continue;
+    const s = field.trim();
+    if (ETH.test(s)) return s; // whole field is the address
+    const m = s.match(ANY_ETH); // address embedded in a slug like the id
+    if (m) return m[0];
+  }
+  const m = JSON.stringify(w).match(ANY_ETH); // last resort: anywhere in the entry
+  return m ? m[0] : null;
+}
+
 for (const w of wallets) {
-  const cap = typeof w?.caption === "string" ? w.caption.trim() : "";
-  if (!ETH.test(cap)) continue;
-  const addr = cap.toLowerCase();
+  const hit = pick(w);
+  if (!hit) continue;
+  const addr = hit.toLowerCase();
   if (seen.has(addr)) continue;
   seen.add(addr);
   addresses.push(addr);
@@ -66,6 +84,11 @@ for (const w of wallets) {
 
 if (!addresses.length) {
   console.error("No Ethereum-format addresses found in the snapshot — refusing to emit an empty list.");
+  // Diagnostics: show what we actually read so the shape is visible in the log.
+  console.error(`  read from : ${IN}`);
+  console.error(`  top-level : ${Array.isArray(feed) ? "array" : "object { " + Object.keys(feed).join(", ") + " }"}`);
+  console.error(`  wallets   : ${wallets.length} entries`);
+  console.error(`  first     : ${JSON.stringify(wallets[0])?.slice(0, 300)}`);
   process.exit(1);
 }
 
