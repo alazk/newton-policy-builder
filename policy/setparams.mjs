@@ -252,6 +252,47 @@ if (!CONFIRM) {
 }
 
 console.log(`\n${B("setPolicy")}`);
+
+/*
+ * Pre-flight the call before spending gas.
+ *
+ * writeContract estimates gas first, and a revert there surfaces only as
+ * "execution reverted for an unknown reason" with no context. simulateContract
+ * runs the same call and gives the decoded reason (for any custom error in the
+ * ABI), and — more importantly here — lets us tell two failures apart:
+ *
+ *   - We could not read the current on-chain list (currentSet === null, e.g. a
+ *     public RPC that won't serve getPolicyConfig). Then the skip-guard was
+ *     blind, and this may just be a no-op rewrite of an unchanged list, which
+ *     the contract rejects. That must NOT fail the scheduled refresh — exit 0
+ *     with guidance to set a real RPC.
+ *   - We DID read the current list and it genuinely differs. Then a revert is a
+ *     real problem worth failing on.
+ */
+try {
+  await pub.simulateContract({
+    account,
+    address: CLIENT, abi: ABI, functionName: "setPolicy",
+    args: [{ policyParams, expireAfter }],
+  });
+} catch (e) {
+  const reason = e?.shortMessage || e?.details || String(e?.message ?? e);
+  if (!currentSet) {
+    console.log(RED("  Pre-flight reverted and the current on-chain list could not be read."));
+    console.log(`  RPC: ${rpc}`);
+    console.log("  Public endpoints often won't serve getPolicyConfig, which also blinds the");
+    console.log("  skip-guard — so this is most likely a no-op rewrite of an unchanged list.");
+    console.log("  Set SEPOLIA_RPC_URL to a dedicated endpoint (Alchemy/Infura) to read the");
+    console.log("  current list, skip cleanly when unchanged, and write when it actually moves.");
+    console.log(`  Reason: ${reason}`);
+    process.exit(0); // green — do not fail the cron on an unverifiable no-op
+  }
+  console.error(RED(`\nsetPolicy would revert: ${reason}`));
+  console.error("The on-chain list was read and differs, so this is not a no-op. Investigate");
+  console.error("owner/binding/expireAfter before retrying.");
+  process.exit(1);
+}
+
 const hash = await wallet.writeContract({
   address: CLIENT, abi: ABI, functionName: "setPolicy",
   args: [{ policyParams, expireAfter }],
