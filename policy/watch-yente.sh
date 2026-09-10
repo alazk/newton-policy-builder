@@ -20,7 +20,7 @@
 #
 # See ../STATUS.md.
 
-APP="https://newton-sanctions-demo.vercel.app"
+APP="https://newton-policy-builder.vercel.app"
 SANCTIONED="0x175d44451403edf28469df03a9280c1197adb92c"
 INTERVAL="${1:-300}"
 

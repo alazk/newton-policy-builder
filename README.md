@@ -9,7 +9,7 @@ The recipient is the only thing screened. Each run also carries a sender
 (transactions need one), but it is freshly generated and the policy does not
 consult it — the screen has a single input on purpose.
 
-Live: **https://newton-sanctions-demo.vercel.app**
+Live: **https://newton-policy-builder.vercel.app**
 
 ---
 

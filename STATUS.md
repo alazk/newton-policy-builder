@@ -10,7 +10,7 @@ running, what is parked, and how to move between them.
 
 ## What is live
 
-**https://newton-sanctions-demo.vercel.app**
+**https://newton-policy-builder.vercel.app**
 
 Enter a recipient; it is screened against a sanctions list and an operator
 quorum signs the decision on Sepolia before the transfer would execute. The
@@ -133,7 +133,7 @@ required.
 
 1. **Confirm the CID now resolves** (the whole blocker):
    ```bash
-   curl -sS -X POST https://newton-sanctions-demo.vercel.app/api/evaluate \
+   curl -sS -X POST https://newton-policy-builder.vercel.app/api/evaluate \
      -H 'content-type: application/json' \
      -d '{"mode":"submit","providerId":"yente","to":"0x175d44451403edf28469df03a9280c1197adb92c","policyDataAddress":"x"}' \
      | python3 -c 'import sys,json; r=json.load(sys.stdin).get("result") or {}; print(r.get("error") or "RESOLVED")'

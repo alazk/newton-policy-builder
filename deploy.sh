@@ -78,7 +78,7 @@ git push -u origin "$BRANCH"
 # Why not just rely on the push:
 #
 # The project has no domain alias attached, so a git push deploys to a fresh
-# preview URL and leaves newton-sanctions-demo.vercel.app pointing at whatever
+# preview URL and leaves newton-policy-builder.vercel.app pointing at whatever
 # was there before. That has cost several rounds of "it's still the old one".
 # --prod is what moves the alias.
 if [ "$PROMOTE" = "1" ]; then
@@ -88,6 +88,6 @@ else
   echo "==> Preview deploy (branch '$BRANCH')"
   npx vercel
   echo
-  echo "    newton-sanctions-demo.vercel.app is unchanged."
+  echo "    newton-policy-builder.vercel.app is unchanged."
   echo "    Merge to main and run this again to promote."
 fi

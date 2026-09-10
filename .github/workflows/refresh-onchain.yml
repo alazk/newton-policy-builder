@@ -94,7 +94,7 @@ jobs:
               print("DENIED" if ev and ev[-1] == 0 else "ALLOWED")
           PY
           submit() {
-            curl -sS -X POST https://newton-sanctions-demo.vercel.app/api/evaluate \
+            curl -sS -X POST https://newton-policy-builder.vercel.app/api/evaluate \
               -H 'content-type: application/json' \
               -d "{\"mode\":\"submit\",\"providerId\":\"local-denylist\",\"to\":\"$1\"}" \
               | python3 /tmp/verdict.py

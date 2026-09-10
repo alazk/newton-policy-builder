@@ -264,7 +264,7 @@ if (receipt.status !== "success") process.exit(1);
 const newId = await call("getPolicyId");
 console.log(`\n  policyId  ${policyId}\n         -> ${newId}`);
 console.log("\nVerify with a real task before trusting it:");
-console.log(`  curl -sS -X POST https://newton-sanctions-demo.vercel.app/api/evaluate \\`);
+console.log(`  curl -sS -X POST https://newton-policy-builder.vercel.app/api/evaluate \\`);
 console.log(`    -H 'content-type: application/json' \\`);
 console.log(`    -d '{"mode":"submit","providerId":"local-denylist","to":"${addresses[0]}"}'`);
 console.log("\nevaluation_result all zeros = denied. Then try a clean address and");
