@@ -65,7 +65,7 @@ OpenSanctions feed (all regimes — currently ~119, across US OFAC, Israel, Japa
 and France). Regenerate it from the `sanctions-api` snapshot:
 
 ```bash
-node sanctions-api/emit-full-list.mjs
+node scripts/emit-full-list.mjs   # reads ../sanctions-api/wallets.json
 ```
 
 Push the list to the on-chain params (one transaction, skips if unchanged):

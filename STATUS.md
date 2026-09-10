@@ -33,7 +33,7 @@ policy client              0xfd054556b4d00d8b0f897b1ae377ecd17fccae78
 policy                     0x627222E71CCEc59C315c83C095f12458FaB5B221
 policy cid                 bafkreigvmehmguzwvy3wla2q56jk25jpfog3ecuym5v6cquoeocjodhqri
 addresses                  119 (lib/ofac-full.ts ∪ pool ∪ 0xB10C list)
-regenerate                 node sanctions-api/emit-full-list.mjs
+regenerate                 node scripts/emit-full-list.mjs
 ```
 
 To change the list by hand: `node policy/setparams.mjs --confirm` (one

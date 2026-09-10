@@ -59,10 +59,12 @@ jobs:
         run: npm ci
 
       - name: Regenerate the Ethereum list from the feed
-        # emit-full-list.mjs reads ../sanctions-api/wallets.json relative to
-        # its own location, which is exactly this checkout layout.
-        working-directory: sanctions-api
-        run: node emit-full-list.mjs
+        # The script lives in policy-builder (scripts/emit-full-list.mjs) and
+        # resolves the snapshot at ../../sanctions-api/wallets.json — the
+        # sibling checkout above. Run it from policy-builder so it also writes
+        # lib/ofac-full.ts back into this checkout.
+        working-directory: policy-builder
+        run: node scripts/emit-full-list.mjs
 
       - name: Push to on-chain params if changed
         working-directory: policy-builder

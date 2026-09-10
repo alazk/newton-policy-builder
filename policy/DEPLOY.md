@@ -25,7 +25,7 @@ quorum-signed.
 
 It screens a **fixed list of 119 addresses** across US OFAC, Israel, Japan and
 France (Ethereum only). Not live screening, and it cannot catch a designation
-made after the snapshot. Regenerate with `node sanctions-api/emit-full-list.mjs`.
+made after the snapshot. Regenerate with `node scripts/emit-full-list.mjs`.
 `lib/catalog.ts` and the UI copy reflect this; keep it that way while bound.
 
 **The deployed rego is frozen — do not edit it to fix the two imprecisions
