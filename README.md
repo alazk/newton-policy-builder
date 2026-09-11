@@ -9,7 +9,8 @@ The recipient is the only thing screened. Each run also carries a sender
 (transactions need one), but it is freshly generated and the policy does not
 consult it — the screen has a single input on purpose.
 
-Live: **https://newton-policy-builder.vercel.app**
+Live: **https://sanctions-demo.newt.foundation** (hosted on the Newton team
+Vercel project `newton-aml-ofac-policy-engine`).
 
 ---
 
@@ -31,13 +32,18 @@ the server.
 
 | Variable | Purpose |
 | --- | --- |
-| `NEWTON_API_KEY` | Authenticates to the Newton gateway. Server-side only. |
-| `POLICY_CLIENT_DENYLIST` | The PolicyClient tasks are submitted against. |
-| `NEXT_PUBLIC_POLICY_CLIENT` | Same address, for display. Baked at build time. |
+| `NEWTON_API_KEY` | Authenticates to the Newton gateway. Server-side only. Its account must **own the PolicyClient on-chain**, or the gateway returns 401. |
+| `POLICY_CLIENT_DENYLIST` | The PolicyClient tasks are submitted against — currently `0x749753713fC04bbDB5dAf9C66cdE293512fe0eE7`. |
+| `NEXT_PUBLIC_POLICY_CLIENT` | Same client address, for display. Baked at build time. |
 | `SEPOLIA_RPC_URL` | Optional. Defaults to a public endpoint. |
 
 On Vercel these live under Settings → Environment Variables; changing them
 needs a redeploy to take effect.
+
+The demo runs on PolicyClient `0x749753…`, bound to the denylist policy
+`0x627222E7…` (CID `bafkreigvmehm…`, entrypoint `newton_sanctions.allow`, 119
+addresses). Owner/signer is `0x8b4bA870…`. An earlier client, `0xfd0545…`, was
+repurposed by another project — do not point the demo back at it.
 
 ---
 
